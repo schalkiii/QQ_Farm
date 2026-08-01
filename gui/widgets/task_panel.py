@@ -34,7 +34,6 @@ from gui.widgets.fluent_container import StableElevatedCardWidget, TransparentCa
 from models.config import (
     DEFAULT_TASK_ENABLED_TIME_RANGE,
     AppConfig,
-    TaskScheduleItemConfig,
     TaskTriggerType,
     normalize_task_enabled_time_range,
     resolve_task_min_interval_seconds,

@@ -543,7 +543,6 @@ class LandScanTask:
 
         cv_img = None
         detections: list[DetectResult] = []
-        found_planted = False
         empty_det = None
 
         for attempt in range(LAND_SCAN_POPUP_WAIT_RETRIES):

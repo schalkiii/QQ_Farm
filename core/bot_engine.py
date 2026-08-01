@@ -15,9 +15,7 @@
   P4  社交:     friend    — 好友巡查/帮忙/偷菜/同意好友
 """
 import ctypes
-import os
 import re
-import sys
 import time
 from datetime import datetime
 import cv2
@@ -49,7 +47,7 @@ from core.strategies import (
     GiftStrategy, TargetedStealStrategy, TargetedPrankStrategy,
 )
 from core.ui.navigator import Navigator
-from core.cross_instance_bus import CrossInstanceBus, StealAlert, PrankAlert
+from core.cross_instance_bus import CrossInstanceBus, StealAlert
 from utils.debug_recorder import configure_debug_recorder, record_debug_event
 from utils.instance_paths import InstancePaths, ensure_instance_layout
 from utils.logger import configure_instance_debug_log, set_gui_log_level
@@ -1339,8 +1337,7 @@ class BotEngine(QObject):
             # ✅ 状态变化检测：避免重复相同检测
             # 构建当前状态的指纹（场景 + 关键按钮集合）
             key_detections = frozenset(d.name for d in detections if d.confidence > 0.7)
-            current_state = (scene, key_detections)
-            
+
             if prev_scene == scene and prev_detection_keys == key_detections:
                 consecutive_same_state += 1
                 if consecutive_same_state >= max_consecutive_same:

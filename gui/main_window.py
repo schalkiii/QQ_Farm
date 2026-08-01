@@ -559,11 +559,6 @@ class MainWindow(QMainWindow):
             self._first_show = False
             QTimer.singleShot(300, self._show_opensource_notice)
 
-    def closeEvent(self, event):
-        self.unregister_hotkeys()
-        self.engine.stop()
-        super().closeEvent(event)
-
     # ── 全局热键 ──────────────────────────────────────────
 
     def register_hotkeys(self):

@@ -91,7 +91,6 @@ def main():
         import urllib.parse
         match = re.match(r"(\d+)_(.+?)_Crop_\d+_Seed", filename)
         if match:
-            seed_id = match.group(1)
             name = match.group(2)
             # 解码URL编码的中文
             name = urllib.parse.unquote(name)

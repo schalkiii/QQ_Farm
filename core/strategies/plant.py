@@ -216,7 +216,7 @@ class PlantStrategy(BaseStrategy):
             if valid_btns:
                 # 还有下一页，点击翻页
                 logger.info(f"播种流程：当前页未找到种子，点击翻页按钮 ({attempt + 1}/{max_attempts})")
-                self.click(page_btn.x, page_btn.y, f"翻页查找种子")
+                self.click(page_btn.x, page_btn.y, "翻页查找种子")
                 time.sleep(0.3)  # 等待翻页动画
 
                 # 重新截屏
@@ -286,7 +286,7 @@ class PlantStrategy(BaseStrategy):
         # 检测是否已播种（通过施肥按钮）
         cv_img, dets, _ = self.capture(rect)
         if cv_img is not None and self._is_already_planted(cv_img):
-            logger.info(f"播种流程：检测到施肥按钮，这块地已播种，跳过")
+            logger.info("播种流程：检测到施肥按钮，这块地已播种，跳过")
             self.click_blank(rect)
             for _ in range(10):
                 if self.stopped:
@@ -411,7 +411,7 @@ class PlantStrategy(BaseStrategy):
         # 第三步：检测是否已播种（通过施肥按钮）
         cv_img, dets, _ = self.capture(rect)
         if cv_img is not None and self._is_already_planted(cv_img):
-            logger.info(f"播种流程：检测到施肥按钮，这块地已播种，跳过")
+            logger.info("播种流程：检测到施肥按钮，这块地已播种，跳过")
             self.click_blank(rect)
             for _ in range(5):
                 if self.stopped:
@@ -1141,7 +1141,7 @@ class PlantStrategy(BaseStrategy):
             shop_close = self.cv_detector.detect_single_template(
                 cv_img, "btn_shop_close", threshold=self.cv_detector.get_template_threshold("btn_shop_close"))
             if not shop_close:
-                logger.warning(f"购买流程：商店关闭按钮消失，可能已意外关闭")
+                logger.warning("购买流程：商店关闭按钮消失，可能已意外关闭")
                 self._close_shop(rect)
                 return None
 

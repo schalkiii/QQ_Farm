@@ -7,7 +7,6 @@ from loguru import logger
 
 import cv2
 import numpy as np
-from PIL import Image as PILImage
 
 # FastAPI 相关（延迟导入，避免未安装时报错）
 _fastapi = None
@@ -123,7 +122,6 @@ class WebServer:
             from fastapi import FastAPI, Request
             from fastapi.responses import Response, HTMLResponse, JSONResponse
             import uvicorn
-            import asyncio
 
             app = FastAPI(title="QQ Farm Bot", docs_url=None, redoc_url=None)
 

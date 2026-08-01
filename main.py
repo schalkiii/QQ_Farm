@@ -2,8 +2,6 @@
 import os
 os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
 import sys
-import time
-import threading
 
 # 确保项目根目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -113,7 +111,6 @@ def main():
     app.setPalette(palette)
 
     # 给所有 QDialog/QMessageBox/QInputDialog 设置浅色背景（覆盖系统暗色主题）
-    from PyQt6.QtWidgets import QDialog
     from gui.styles import Colors
     _dialog_css = f"""
         QDialog, QMessageBox, QInputDialog {{
@@ -274,12 +271,12 @@ def _stop_web_server():
     global _global_web_server
     from loguru import logger
     
-    logger.info(f"_stop_web_server 被调用")
+    logger.info("_stop_web_server 被调用")
     logger.info(f"_global_web_server 存在: {_global_web_server is not None}")
     logger.info(f"id(_global_web_server): {id(_global_web_server) if _global_web_server else 'None'}")
     
     if _global_web_server:
-        logger.info(f"调用 _global_web_server.stop()")
+        logger.info("调用 _global_web_server.stop()")
         logger.info(f"_global_web_server._running: {_global_web_server._running}")
         logger.info(f"_global_web_server._server: {_global_web_server._server}")
         logger.info(f"_global_web_server._thread: {_global_web_server._thread}")

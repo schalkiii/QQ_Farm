@@ -28,10 +28,6 @@ class PlantMode(str, Enum):
     LATEST_LEVEL = "latest_level"    # 当前等级下可种植的最高等级作物
 
 
-class SellConfig(BaseModel):
-    """出售配置 — 仅支持批量全部出售"""
-
-
 class FriendConfig(BaseModel):
     enable_steal: bool = True       # 是否偷菜
     enable_maintain: bool = True    # 帮好友一键务农
@@ -371,14 +367,6 @@ class AppConfig(BaseModel):
                 interval_seconds=120,
                 enabled_time_range="05:00:00-23:59:59",
                 failure_interval_seconds=300,
-            ),
-            "restart": TaskScheduleItemConfig(
-                enabled=False, priority=2, trigger=TaskTriggerType.INTERVAL,
-                interval_seconds=1800, failure_interval_seconds=300,
-            ),
-            "repair": TaskScheduleItemConfig(
-                enabled=False, priority=3, trigger=TaskTriggerType.INTERVAL,
-                interval_seconds=600, failure_interval_seconds=60,
             ),
         }
 

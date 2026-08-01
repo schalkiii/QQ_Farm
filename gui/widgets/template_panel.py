@@ -1,5 +1,4 @@
 """模板管理面板 — 模板列表 + 启用/禁用 + 内置采集器"""
-import json
 import os
 import time
 import numpy as np
@@ -8,14 +7,14 @@ import cv2
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QFrame, QCheckBox, QLineEdit, QFileDialog,
-    QSizePolicy, QComboBox, QDialog, QFormLayout, QDialogButtonBox,
-    QSpacerItem, QSizePolicy as QSP, QSlider, QDoubleSpinBox, QSplitter,
-    QMessageBox, QInputDialog, QSpinBox,
+    QComboBox, QDialog, QFormLayout, QDialogButtonBox,
+    QSlider, QDoubleSpinBox, QSplitter,
+    QMessageBox, QInputDialog, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QBrush, QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QThread, QTimer
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QBrush
 
-from gui.styles import Colors, ghost_button_style
+from gui.styles import Colors
 from core.cv_detector import CVDetector, TEMPLATE_CATEGORIES, DetectResult
 from models.game_data import get_crop_by_name, get_crop_unlock_level
 from loguru import logger
@@ -799,15 +798,12 @@ class TemplateCard(QFrame):
         if self._selected:
             bg = "#ffffff"
             border = Colors.PRIMARY
-            shadow = "rgba(0, 122, 255, 15)"
         elif self._enabled:
             bg = Colors.CARD_BG
             border = Colors.BORDER
-            shadow = "rgba(0, 0, 0, 6)"
         else:
             bg = "#fafafa"
             border = "rgba(0,0,0,6)"
-            shadow = "transparent"
         self.setStyleSheet(f"""
             QFrame#templateCard {{
                 background-color: {bg};
@@ -1844,8 +1840,6 @@ class SaveTemplateDialog(QDialog):
 
         self._type_combo = QComboBox()
         for prefix, label in _PREFIX_LABELS.items():
-            cat = TEMPLATE_CATEGORIES.get(prefix, "unknown")
-            cat_color = _CAT_COLORS.get(cat, "#AEAEB2")
             self._type_combo.addItem(label, prefix)
         self._type_combo.currentIndexChanged.connect(self._update_preview)
         form.addRow("模板类型:", self._type_combo)
@@ -2404,10 +2398,10 @@ class TemplatePanel(QWidget):
         self._content_lay.setContentsMargins(0, 0, 0, 0)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._splitter.setStyleSheet(f"""
-            QSplitter::handle {{
+        self._splitter.setStyleSheet("""
+            QSplitter::handle {
                 background-color: transparent; width: 0px;
-            }}
+            }
         """)
 
         self._scroll = QScrollArea()
@@ -2632,7 +2626,6 @@ class TemplatePanel(QWidget):
         self._filter.clear()
         self._filter.addItem(_FILTER_ALL)
         for prefix, cat in TEMPLATE_CATEGORIES.items():
-            color = _CAT_COLORS.get(cat, "#AEAEB2")
             label = _CAT_LABELS.get(cat, cat)
             self._filter.addItem(f"{prefix}_  {label}")
 
@@ -2689,11 +2682,11 @@ class TemplatePanel(QWidget):
         lay.addWidget(tb)
 
         self._selector = ScreenshotSelector()
-        self._selector.setStyleSheet(f"""
-            QWidget {{
+        self._selector.setStyleSheet("""
+            QWidget {
                 background-color: rgba(0,0,0,6);
                 border: none;
-            }}
+            }
         """)
         lay.addWidget(self._selector, 1)
         return w
@@ -2820,7 +2813,7 @@ class TemplatePanel(QWidget):
         self.templates_changed.emit()
 
     def _on_import(self):
-        from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
         files, _ = QFileDialog.getOpenFileNames(
             self, "选择模板图片", "",
             "图片 (*.png *.jpg *.jpeg);;所有文件 (*)")
@@ -2857,7 +2850,7 @@ class TemplatePanel(QWidget):
             self.templates_changed.emit()
 
     def _on_category_thresholds(self):
-        from PyQt6.QtWidgets import QSlider, QFormLayout, QSpinBox, QDoubleSpinBox
+        from PyQt6.QtWidgets import QSlider, QDoubleSpinBox
         from PyQt6.QtCore import Qt
         from gui.styles import Colors
 

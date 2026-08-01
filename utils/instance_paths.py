@@ -197,7 +197,6 @@ def list_instances(meta: dict[str, Any] | None = None) -> list[dict[str, Any]]:
 def create_instance(instance_id: str, *, name: str | None = None) -> dict[str, Any]:
     """创建实例目录并返回元数据条目"""
     iid = sanitize_instance_name(instance_id)
-    paths = ensure_instance_layout(iid)
     now = _now_iso()
     return {
         'id': iid,

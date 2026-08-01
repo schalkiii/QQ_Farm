@@ -2,7 +2,6 @@
 import ctypes
 import ctypes.wintypes
 import os
-import subprocess
 import time
 from dataclasses import dataclass
 from loguru import logger

@@ -7,7 +7,6 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QShowEvent
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -15,7 +14,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QComboBox,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -296,12 +294,12 @@ class LandDetailPanel(QWidget):
         self._clear_btn = QPushButton("清除数据")
         self._clear_btn.setFixedSize(72, 28)
         self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._clear_btn.setStyleSheet(f"""
-            QPushButton {{
+        self._clear_btn.setStyleSheet("""
+            QPushButton {
                 background-color: #ef4444; border: none;
                 border-radius: 6px; color: #fff; font-weight: 600; font-size: 12px;
-            }}
-            QPushButton:hover {{ background-color: #dc2626; }}
+            }
+            QPushButton:hover { background-color: #dc2626; }
         """)
         self._clear_btn.clicked.connect(self._on_clear_data)
         profile_header.addWidget(self._clear_btn)
@@ -309,7 +307,7 @@ class LandDetailPanel(QWidget):
 
         profile_divider = QFrame()
         profile_divider.setFixedHeight(1)
-        profile_divider.setStyleSheet(f"background-color: rgba(0, 122, 255, 0.1); border: none;")
+        profile_divider.setStyleSheet("background-color: rgba(0, 122, 255, 0.1); border: none;")
         profile_layout.addWidget(profile_divider)
 
         profile_grid = QHBoxLayout()
@@ -367,7 +365,7 @@ class LandDetailPanel(QWidget):
 
         board_divider = QFrame()
         board_divider.setFixedHeight(1)
-        board_divider.setStyleSheet(f"background-color: rgba(0, 122, 255, 0.1); border: none;")
+        board_divider.setStyleSheet("background-color: rgba(0, 122, 255, 0.1); border: none;")
         board_layout.addWidget(board_divider)
 
         grid = QGridLayout()

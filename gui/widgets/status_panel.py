@@ -14,7 +14,6 @@ from qfluentwidgets import (
     FluentIcon,
     IconWidget,
     StrongBodyLabel,
-    isDarkTheme,
 )
 
 
