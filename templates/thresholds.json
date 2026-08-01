@@ -20,7 +20,7 @@
     "shop_椰子": 0.73,
     "seed_爱心果": 0.61,
     "shop_金针菇": 0.76,
-    "btn_seed_select_right": 0.9,
+    "btn_seed_select_right": 0.75,
     "seed_白萝卜": 0.88,
     "ws_鲜姜": 0.77,
     "ws_金针菇": 0.77,
@@ -44,6 +44,8 @@
     "icon_caiji": 0.65,
     "btn_land_right_2": 0.82,
     "btn_warehouse": 0.73,
+    "ws_土豆": 0.78,
+    "ws_油菜": 0.78,
     "btn_shop": 0.74,
     "seed_金银花": 0.85
   },
@@ -56,6 +58,6 @@
     "seed": 0.8,
     "shop": 0.7,
     "unknown": 0.8,
-    "warehouse_seed": 0.88
+    "warehouse_seed": 0.8
   }
 }

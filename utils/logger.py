@@ -11,10 +11,36 @@ class LogSignal(QObject):
 
 _log_signal = LogSignal()
 _debug_sink_ids: dict[str, int] = {}
+# GUI sink 的句柄与当前级别，供调试模式动态切换
+_gui_sink_id: int | None = None
+_gui_sink_level: str = "INFO"
 
 
 def get_log_signal() -> LogSignal:
     return _log_signal
+
+
+def set_gui_log_level(debug_enabled: bool) -> str:
+    """切换 GUI 日志面板的输出级别。
+
+    调试模式下降到 DEBUG，使性能优化中降级为 debug 的诊断信息
+    （如 AppConfig.save 的写盘/跳过记录）重新在界面上可见；
+    关闭时回到 INFO，避免高频 debug 日志冲垮 GUI 主线程。
+    """
+    global _gui_sink_id, _gui_sink_level
+    level = "DEBUG" if debug_enabled else "INFO"
+    if level == _gui_sink_level and _gui_sink_id is not None:
+        return level
+    if _gui_sink_id is not None:
+        try:
+            logger.remove(_gui_sink_id)
+        except Exception:
+            pass
+    _gui_sink_id = logger.add(
+        _gui_sink, level=level,
+        format="{time:HH:mm:ss} | {level:<7} | {message}")
+    _gui_sink_level = level
+    return level
 
 
 def _gui_sink(message):
@@ -92,9 +118,11 @@ def setup_logger(log_dir: str | None = None):
     logger.add(os.path.join(log_dir, "bot_{time:YYYY-MM-DD}.log"),
                rotation="00:00", retention="7 days", level="DEBUG",
                format="{time:YYYY-MM-DD HH:mm:ss} | {level:<7} | {message}",
-               encoding="utf-8")
-    # GUI输出
-    logger.add(_gui_sink, level="INFO",
-               format="{time:HH:mm:ss} | {level:<7} | {message}")
+               encoding="utf-8", enqueue=True)
+    # GUI输出（句柄由 set_gui_log_level 统一管理，便于调试模式切换级别）
+    global _gui_sink_id, _gui_sink_level
+    _gui_sink_id = logger.add(_gui_sink, level="INFO",
+                              format="{time:HH:mm:ss} | {level:<7} | {message}")
+    _gui_sink_level = "INFO"
 
     return logger

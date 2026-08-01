@@ -24,6 +24,7 @@ class StatusPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._labels: dict[str, StrongBodyLabel] = {}
+        self._last_state_badge: str | None = None
         self._numeric_keys = {
             "running_tasks", "pending_tasks", "waiting_tasks",
         }
@@ -231,16 +232,19 @@ class StatusPanel(QWidget):
         label.setText(state_text)
         label.setToolTip(state_text)
         label.setTextColor(fg, fg)
-        label.setStyleSheet(
-            "QLabel {"
-            f" background-color: {bg};"
-            f" border: 1px solid {border};"
-            " border-radius: 8px;"
-            " padding: 0 7px;"
-            " font-size: 12px;"
-            " font-weight: 600;"
-            " }"
-        )
+        # 仅在状态变化时重设样式表，避免每 500ms 触发整棵子树样式重算
+        if self._last_state_badge != state:
+            self._last_state_badge = state
+            label.setStyleSheet(
+                "QLabel {"
+                f" background-color: {bg};"
+                f" border: 1px solid {border};"
+                " border-radius: 8px;"
+                " padding: 0 7px;"
+                " font-size: 12px;"
+                " font-weight: 600;"
+                " }"
+            )
 
     def update_stats(self, stats: dict):
         state = str(stats.get("state", "idle"))

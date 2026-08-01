@@ -18,7 +18,12 @@ class LogPanel(QWidget):
         self._active_filters = {"INFO", "WARNING", "ERROR", "OTHER"}
         self._counts = {"INFO": 0, "WARNING": 0, "ERROR": 0, "OTHER": 0}
         self._entries: list[tuple[str, str, str]] = []  # (message, color, level)
+        self._pending: list[tuple[str, str, str]] = []  # 待刷新的日志缓冲
         self._init_ui()
+        # 日志批量刷新：把高频 append_log 合并到 ~16ms 一次渲染，降低主线程压力
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setInterval(16)
+        self._flush_timer.timeout.connect(self._flush_pending)
 
     def _init_ui(self):
         outer = QVBoxLayout(self)
@@ -177,8 +182,13 @@ class LogPanel(QWidget):
         for msg, color, level in self._entries:
             if level in self._active_filters:
                 self._append_colored(msg, color)
+        self._log_text.verticalScrollBar().setValue(
+            self._log_text.verticalScrollBar().maximum())
 
     def _append_colored(self, text: str, color: str):
+        # 仅当用户已处于底部时才自动跟随，避免用户上滚查看历史时被强制拉回
+        sb = self._log_text.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 4
         cursor = self._log_text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
@@ -186,7 +196,8 @@ class LogPanel(QWidget):
         cursor.insertText(text, fmt)
         cursor.insertBlock()
         self._log_text.setTextCursor(cursor)
-        self._log_text.verticalScrollBar().setValue(self._log_text.verticalScrollBar().maximum())
+        if at_bottom:
+            sb.setValue(sb.maximum())
 
     def _copy_log(self):
         clipboard = QApplication.clipboard()
@@ -198,6 +209,8 @@ class LogPanel(QWidget):
     def _clear_log(self):
         self._log_text.clear()
         self._entries.clear()
+        self._pending.clear()
+        self._flush_timer.stop()
         self._counts = {"INFO": 0, "WARNING": 0, "ERROR": 0, "OTHER": 0}
         self._update_badge()
         self.append_log("日志已清空")
@@ -219,4 +232,21 @@ class LogPanel(QWidget):
             self._entries = self._entries[-self.MAX_LINES:]
 
         if level in self._active_filters:
+            # 入缓冲，由定时器批量渲染，避免每条日志都触发一次主线程重绘
+            self._pending.append((text, color))
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
+
+
+    def _flush_pending(self):
+        """批量把缓冲日志渲染到文本框，减少主线程重绘次数。"""
+        if not self._pending:
+            self._flush_timer.stop()
+            return
+        batch = self._pending
+        self._pending = []
+        for text, color in batch:
             self._append_colored(text, color)
+        if not self._pending:
+            self._flush_timer.stop()
+

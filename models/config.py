@@ -385,7 +385,21 @@ class AppConfig(BaseModel):
     def save(self, path: str | None = None):
         p = path or self._config_path or "config.json"
         from loguru import logger
-        logger.info(f"🔒 AppConfig.save: id={id(self)} → {p} | features.auto_harvest={self.features.auto_harvest}")
+        # 高频调用（如每轮任务回写 next_run）。先序列化并做脏检查，
+        # 内容未变化则跳过磁盘写，避免主线程被同步 IO 反复阻塞。
         data = self.model_dump()
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        serialized = json.dumps(data, ensure_ascii=False, indent=2)
+        last_hash = getattr(self, "_last_saved_hash", None)
+        if last_hash == hash(serialized):
+            logger.debug(f"AppConfig.save 跳过（内容未变更）: {p}")
+            return
+        logger.debug(
+            f"🔒 AppConfig.save: id={id(self)} → {p} | "
+            f"features.auto_harvest={self.features.auto_harvest}"
+        )
+        # 先写临时文件再原子替换，避免进程崩溃时损坏 config.json
+        tmp_path = f"{p}.{os.getpid()}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(serialized)
+        os.replace(tmp_path, p)
+        self._last_saved_hash = hash(serialized)

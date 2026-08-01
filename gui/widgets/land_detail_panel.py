@@ -241,7 +241,6 @@ class LandDetailPanel(QWidget):
         self._init_ui()
         self._load_from_config()
         self._set_edit_mode(False)
-        self._countdown_timer.start()
 
     @staticmethod
     def _plot_id_at(row: int, col: int) -> str:
@@ -535,8 +534,17 @@ class LandDetailPanel(QWidget):
         for cell in self._cells.values():
             cell.tick_countdown()
 
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        # 面板隐藏时停止倒计时定时器，避免后台空转消耗主线程
+        if self._countdown_timer.isActive():
+            self._countdown_timer.stop()
+
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
+        # 面板可见时才运行倒计时定时器
+        if not self._countdown_timer.isActive():
+            self._countdown_timer.start()
         # 每次显示时刷新
         cfg_path = str(getattr(self.config, '_config_path', '') or '').strip()
         if cfg_path:
