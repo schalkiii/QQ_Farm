@@ -88,7 +88,6 @@ class OCRTool:
             return []
 
         items: list[OCRItem] = []
-        inv = 1.0 / scale if scale != 0 else 1.0
         for line in raw:
             box_raw = line[0]  # list of 4 points
             text = line[1]

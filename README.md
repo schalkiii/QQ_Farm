@@ -218,6 +218,8 @@ python skills/qq-farm-add-seed/scripts/add_seed.py --repo . --name "新作物"
 - `debug_YYYY-MM-DD.log`：完整调试文本日志。
 - `task_trace_YYYY-MM-DD.jsonl`：任务调度诊断事件，可查看任务开始/结束、时间窗跳过、动态注入、恢复触发等原因。
 
+开启调试模式后，GUI 主界面的**日志面板级别会自动从 INFO 降到 DEBUG**，性能优化中降级为 `logger.debug` 的诊断信息（如 `AppConfig.save` 的写盘/跳过记录、连续相同状态跳过调度等）会重新在界面上实时可见；关闭调试模式后恢复 INFO，避免高频 debug 日志冲垮 GUI 主线程。
+
 ## 异常与窗口监控
 
 当前已覆盖：
@@ -270,6 +272,19 @@ Web 服务依赖 `fastapi` 和 `uvicorn`，在 `requirements.txt` 中作为可�
 - **v2.0.5+**：稀有作物、特殊作物成熟图标、特殊作物偷菜、等级输入上限扩展。
 - **v2.0.4**：一键务农合并除草/浇水/除虫，新增活动作物。
 - **v2.0.0**：多实例、任务调度、模板与种子/商店/仓库体系大规模升级。
+
+## 代码质量与 Lint
+
+项目使用 `ruff` / `pyflakes` 做静态检查。本轮清理聚焦**确定性、零风险的真实缺陷**，未做大规模风格重构：
+
+- **未使用导入（F401）**：删除 `bot_engine.py`、`task_panel.py`、`land_scan.py` 等多处冗余 `import`；为 `core/strategies/__init__.py` 添加 `__all__` 保留包级公开 API（供 `from core.strategies import X` 使用），而非删除再导出。
+- **未使用变量（F841）**：删除 `current_state`、`shadow`、`cat_color`、`color`、`found_planted`、`seed_id`、`paths`、`inv` 等死变量。
+- **无占位符 f-string（F541）**：将误用 f 前缀的常量字符串还原为普通字符串。
+- **未定义名称（F821）**：恢复被误删的 `QSizePolicy` 导入（`template_panel.py` 实际使用了它）。
+- **字典重复 key（pyflakes）**：`AppConfig` 默认任务表 `repair` / `restart` 各重复定义一次，后值覆盖前值；删除重复项，每个任务 key 唯一。
+- **重复定义（pyflakes）**：`main_window.py` 的 `closeEvent` 被定义两次，后者覆盖前者导致多实例引擎未被停止；保留含多实例停止逻辑的版本，删除早期重复定义。`SellConfig` 重复类定义已合并为一份。
+
+可选依赖探测导入（如 `friend_name_ocr.py` 的 `OCRItem` / `OCRTool`）用于设置 `HAS_OCR` 可用标志，属有意保留，已加 `# noqa: F401` 标注。
 
 ## 已知限制
 

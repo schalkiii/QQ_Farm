@@ -15,9 +15,7 @@
   P4  社交:     friend    — 好友巡查/帮忙/偷菜/同意好友
 """
 import ctypes
-import os
 import re
-import sys
 import time
 from datetime import datetime
 import cv2
@@ -50,10 +48,10 @@ from core.strategies import (
     GiftStrategy, TargetedStealStrategy, TargetedPrankStrategy,
 )
 from core.ui.navigator import Navigator
-from core.cross_instance_bus import CrossInstanceBus, StealAlert, PrankAlert
+from core.cross_instance_bus import CrossInstanceBus, StealAlert
 from utils.debug_recorder import configure_debug_recorder, record_debug_event
 from utils.instance_paths import InstancePaths, ensure_instance_layout
-from utils.logger import configure_instance_debug_log
+from utils.logger import configure_instance_debug_log, set_gui_log_level
 
 
 class BotWorker(QThread):
@@ -380,6 +378,8 @@ class BotEngine(QObject):
             str(paths.logs_dir),
         )
         debug_dir = configure_debug_recorder(self.instance_id, enabled, paths.logs_dir)
+        # 同步 GUI 日志面板级别：调试模式下让 debug 级诊断信息重新可见
+        set_gui_log_level(enabled)
         if enabled:
             trace_pattern = debug_dir / "task_trace_YYYY-MM-DD.jsonl" if debug_dir else "-"
             logger.info(f"调试模式已启用: 文本日志={debug_log_pattern} | 任务诊断={trace_pattern}")
@@ -1133,7 +1133,7 @@ class BotEngine(QObject):
 
     def _capture_and_detect(self, rect: tuple, prefix: str = "farm",
                             categories: list[str] | None = None,
-                            save: bool = True
+                            save: bool = False
                             ) -> tuple[np.ndarray | None, list[DetectResult], PILImage.Image | None]:
         # 确保模板已加载
         if not self.cv_detector._loaded:
@@ -1354,8 +1354,7 @@ class BotEngine(QObject):
             # ✅ 状态变化检测：避免重复相同检测
             # 构建当前状态的指纹（场景 + 关键按钮集合）
             key_detections = frozenset(d.name for d in detections if d.confidence > 0.7)
-            current_state = (scene, key_detections)
-            
+
             if prev_scene == scene and prev_detection_keys == key_detections:
                 consecutive_same_state += 1
                 if consecutive_same_state >= max_consecutive_same:

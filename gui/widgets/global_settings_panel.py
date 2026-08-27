@@ -15,7 +15,6 @@ from qfluentwidgets import (
     SwitchSettingCard,
     setTheme,
     Theme,
-    isDarkTheme,
 )
 
 

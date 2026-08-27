@@ -34,7 +34,6 @@ from gui.widgets.fluent_container import StableElevatedCardWidget, TransparentCa
 from models.config import (
     DEFAULT_TASK_ENABLED_TIME_RANGE,
     AppConfig,
-    TaskScheduleItemConfig,
     TaskTriggerType,
     normalize_task_enabled_time_range,
     resolve_task_min_interval_seconds,
@@ -490,10 +489,11 @@ class TaskPanel(QWidget):
                 continue
             next_run_dt = getattr(item, "next_run", None)
             if next_run_dt:
-                qdt = QDateTime.fromString(
-                    next_run_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "yyyy-MM-dd HH:mm:ss",
-                )
+                # 避免 datetime -> 字符串 -> QDateTime 的无效往返：直接由时间戳构造
+                if hasattr(next_run_dt, "timestamp"):
+                    qdt = QDateTime.fromSecsSinceEpoch(int(next_run_dt.timestamp()))
+                else:
+                    qdt = QDateTime.fromString(str(next_run_dt), "yyyy-MM-dd HH:mm:ss")
                 if qdt.isValid() and next_run.dateTime() != qdt:
                     next_run.setDateTime(qdt)
         self._loading = False

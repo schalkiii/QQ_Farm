@@ -3,7 +3,7 @@ from __future__ import annotations
 
 try:
     from utils.ocr_provider import get_ocr_tool
-    from utils.ocr_utils import OCRItem, OCRTool
+    from utils.ocr_utils import OCRItem, OCRTool  # noqa: F401  # 仅用于探测 OCR 依赖是否可用
     HAS_OCR = True
 except ImportError:
     HAS_OCR = False

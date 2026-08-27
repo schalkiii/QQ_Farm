@@ -547,8 +547,8 @@ class MainWindow(QMainWindow):
         if idx == 0 and self.engine:
             # scheduler.get_stats() 已包含 runtime_metrics（由执行器快照回调实时更新）
             self._status_panel.update_stats(self.engine.scheduler.get_stats())
-        # 始终刷新任务调度面板的 next_run（不限制当前页面）
-        if self.engine and self.engine._async_executor:
+        # 仅当任务调度面板可见时才刷新 next_run，避免后台页空转占用主线程
+        if self._task_panel.isVisible() and self.engine and self.engine._async_executor:
             self._task_panel.refresh_snapshots(self.engine._task_snapshots)
 
     def _on_stats_for_task_panel(self, _stats):
@@ -634,11 +634,6 @@ class MainWindow(QMainWindow):
         if self._first_show:
             self._first_show = False
             QTimer.singleShot(300, self._show_opensource_notice)
-
-    def closeEvent(self, event):
-        self.unregister_hotkeys()
-        self.engine.stop()
-        super().closeEvent(event)
 
     # ── 全局热键 ──────────────────────────────────────────
 

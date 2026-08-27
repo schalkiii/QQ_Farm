@@ -18,12 +18,12 @@ class LogPanel(QWidget):
         self._active_filters = {"INFO", "WARNING", "ERROR", "OTHER"}
         self._counts = {"INFO": 0, "WARNING": 0, "ERROR": 0, "OTHER": 0}
         self._entries: list[tuple[str, str, str]] = []  # (message, color, level)
-        self._buffer: list[tuple[str, str, str]] = []  # 待刷新的日志缓冲（批量渲染）
+        self._pending: list[tuple[str, str, str]] = []  # 待刷新的日志缓冲
         self._init_ui()
-        # 批量刷新：将高频日志合并到 ~120ms 一次的刷新，避免逐行滚动导致 GUI 卡顿
+        # 日志批量刷新：把高频 append_log 合并到 ~16ms 一次渲染，降低主线程压力
         self._flush_timer = QTimer(self)
-        self._flush_timer.setInterval(120)
-        self._flush_timer.timeout.connect(self._flush)
+        self._flush_timer.setInterval(16)
+        self._flush_timer.timeout.connect(self._flush_pending)
 
     def _init_ui(self):
         outer = QVBoxLayout(self)
@@ -185,6 +185,9 @@ class LogPanel(QWidget):
         self._log_text.verticalScrollBar().setValue(self._log_text.verticalScrollBar().maximum())
 
     def _append_colored(self, text: str, color: str):
+        # 仅当用户已处于底部时才自动跟随，避免用户上滚查看历史时被强制拉回
+        sb = self._log_text.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 4
         cursor = self._log_text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
@@ -192,28 +195,8 @@ class LogPanel(QWidget):
         cursor.insertText(text, fmt)
         cursor.insertBlock()
         self._log_text.setTextCursor(cursor)
-
-    def _flush(self):
-        """批量渲染缓冲区日志：仅滚动一次，降低高频日志下的 GUI 开销"""
-        if not self._buffer:
-            return
-        entries = self._buffer
-        self._buffer = []
-        at_bottom = self._log_text.verticalScrollBar().value() >= self._log_text.verticalScrollBar().maximum() - 4
-
-        for text, color, level in entries:
-            self._counts[level] = self._counts.get(level, 0) + 1
-            self._entries.append((text, color, level))
-        if len(self._entries) > self.MAX_LINES:
-            self._entries = self._entries[-self.MAX_LINES:]
-
-        for text, color, level in entries:
-            if level in self._active_filters:
-                self._append_colored(text, color)
-
-        self._update_badge()
         if at_bottom:
-            self._log_text.verticalScrollBar().setValue(self._log_text.verticalScrollBar().maximum())
+            sb.setValue(sb.maximum())
 
     def _copy_log(self):
         clipboard = QApplication.clipboard()
@@ -225,7 +208,8 @@ class LogPanel(QWidget):
     def _clear_log(self):
         self._log_text.clear()
         self._entries.clear()
-        self._buffer.clear()
+        self._pending.clear()
+        self._flush_timer.stop()
         self._counts = {"INFO": 0, "WARNING": 0, "ERROR": 0, "OTHER": 0}
         self._update_badge()
         self.append_log("日志已清空")
@@ -239,6 +223,29 @@ class LogPanel(QWidget):
         if not text:
             return
         color, level = self._resolve_level_color(text)
-        self._buffer.append((text, color, level))
-        if not self._flush_timer.isActive():
-            self._flush_timer.start()
+        self._counts[level] = self._counts.get(level, 0) + 1
+        self._update_badge()
+
+        self._entries.append((text, color, level))
+        if len(self._entries) > self.MAX_LINES:
+            self._entries = self._entries[-self.MAX_LINES:]
+
+        if level in self._active_filters:
+            # 入缓冲，由定时器批量渲染，避免每条日志都触发一次主线程重绘
+            self._pending.append((text, color))
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
+
+
+    def _flush_pending(self):
+        """批量把缓冲日志渲染到文本框，减少主线程重绘次数。"""
+        if not self._pending:
+            self._flush_timer.stop()
+            return
+        batch = self._pending
+        self._pending = []
+        for text, color in batch:
+            self._append_colored(text, color)
+        if not self._pending:
+            self._flush_timer.stop()
+

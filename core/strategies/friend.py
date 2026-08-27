@@ -620,7 +620,7 @@ class FriendStrategy(BaseStrategy):
                 
                 # 防卡死检查
                 if self._check_consecutive_click(candidate.x, candidate.y):
-                    logger.warning(f"滑动后仍检测到同一位置，停止切换")
+                    logger.warning("滑动后仍检测到同一位置，停止切换")
                     return False
                 
                 self.click(candidate.x, candidate.y, "切换好友")

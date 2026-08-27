@@ -122,7 +122,6 @@ class WebServer:
             from fastapi import FastAPI, Request
             from fastapi.responses import Response, HTMLResponse, JSONResponse
             import uvicorn
-            import asyncio
 
             app = FastAPI(title="QQ Farm Bot", docs_url=None, redoc_url=None)
 

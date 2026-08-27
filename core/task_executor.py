@@ -13,7 +13,7 @@
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
 from typing import Callable, Any
 
 from loguru import logger
@@ -635,7 +635,7 @@ class TaskExecutor:
                     self._debug_event("maintain_request_skipped", reason="main_disabled")
                     return
                 task.next_run = datetime.now()
-                logger.info(f"[大小号捣乱🧹] 收到清理请求，触发 main 任务（一键务农）")
+                logger.info("[大小号捣乱🧹] 收到清理请求，触发 main 任务（一键务农）")
                 self._debug_event("maintain_request_triggered", task="main")
         self._wake_event.set()
 

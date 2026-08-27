@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-import os
 import pathlib
 
 import pygetwindow as gw
@@ -13,7 +12,6 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QSizePolicy,
     QTimeEdit,
     QVBoxLayout,
     QWidget,
@@ -30,7 +28,6 @@ from qfluentwidgets import (
     SpinBox,
 )
 
-from gui.styles import Colors
 from gui.widgets.fluent_container import StableElevatedCardWidget, TransparentCardContainer
 from models.config import AppConfig, PlantMode, RunMode, WindowPosition, CrossInstancePartnerConfig
 from models.game_data import CROPS, format_grow_time, get_best_crop_for_level, get_crop_names

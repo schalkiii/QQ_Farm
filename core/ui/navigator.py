@@ -9,7 +9,7 @@ from typing import Callable
 from loguru import logger
 
 from core.cv_detector import DetectResult
-from core.ui.page import Page, page_main, ALL_PAGES
+from core.ui.page import Page, ALL_PAGES
 
 
 class Navigator:
@@ -101,7 +101,7 @@ class Navigator:
             if current == target:
                 return True
             if current is None:
-                logger.debug(f"导航: 未识别页面，尝试关闭弹窗")
+                logger.debug("导航: 未识别页面，尝试关闭弹窗")
                 self.handle_close_popup(rect)
                 time.sleep(0.5)
                 continue

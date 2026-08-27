@@ -42,18 +42,18 @@ class TitleBar(QWidget):
         layout.addWidget(title)
         layout.addStretch()
 
-        btn_style = f"""
-            QPushButton {{
+        btn_style = """
+            QPushButton {
                 background: transparent;
                 border: none;
                 padding: 0;
                 margin: 0;
                 width: 46px; height: 36px;
                 border-radius: 0px;
-            }}
-            QPushButton:hover {{
+            }
+            QPushButton:hover {
                 background: rgba(0, 0, 0, 15);
-            }}
+            }
         """
         close_hover = f"""
             QPushButton {{

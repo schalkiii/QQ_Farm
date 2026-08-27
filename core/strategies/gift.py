@@ -19,11 +19,10 @@ import time
 from loguru import logger
 
 import cv2
-import numpy as np
 
 from core.cv_detector import DetectResult
-from core.strategies.base import BaseStrategy, SCALES_FAST
-from core.ui.page import page_main, page_mall, page_mail, ALL_PAGES
+from core.strategies.base import BaseStrategy
+from core.ui.page import page_mall, page_mail
 
 
 class GiftStrategy(BaseStrategy):
