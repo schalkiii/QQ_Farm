@@ -88,6 +88,14 @@ class GiftStrategy(BaseStrategy):
                 logger.info("礼品: 已回到主页")
                 return
 
+            # 侧边菜单打开 → 点击汉堡收起，恢复主页
+            if "menu_check" in names:
+                mc = self.find_by_name(dets, "menu_check")
+                if mc:
+                    self.click(mc.x, mc.y, "礼品: 收起侧边菜单")
+                    time.sleep(0.8)
+                    continue
+
             # 商城页面 → 点击返回
             back = self.find_any(dets, ["mall_goto_main", "btn_shangcehng_fanhui"])
             if back:

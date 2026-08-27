@@ -2388,8 +2388,11 @@ class TemplatePanel(QWidget):
         self._worker: CaptureWorker | None = None
         self._items: list[tuple[str, str, float]] = []
         self._selected_name: str = ""
+        self._templates_loaded = False
         self._init_ui()
-        self._load_templates()
+        # 延迟加载模板列表：避免启动时同步构建 700+ 缩略图控件阻塞 UI。
+        # 首次进入模板页（MainWindow 调用 ensure_templates_loaded）或 600ms 后兜底加载。
+        QTimer.singleShot(600, self._load_templates)
 
     def _init_ui(self):
         root = QVBoxLayout(self)
@@ -2698,7 +2701,16 @@ class TemplatePanel(QWidget):
         lay.addWidget(self._selector, 1)
         return w
 
-    def _load_templates(self):
+    def ensure_templates_loaded(self):
+        """首次进入模板页时按需加载（若尚未加载过则不重复构建）"""
+        if not self._templates_loaded:
+            self._load_templates()
+
+    def _load_templates(self, force: bool = False):
+        # 非强制且已加载过（例如延迟计时器与导航触发竞态）则跳过，避免重复构建 700+ 控件
+        if self._templates_loaded and not force:
+            return
+        self._templates_loaded = True
         self._detector.load_templates()
         d = self._detector._templates_dir
         if not os.path.exists(d):
@@ -2790,7 +2802,7 @@ class TemplatePanel(QWidget):
             card.set_selected(False)
 
     def _on_detail_changed(self):
-        self._load_templates()
+        self._load_templates(force=True)
         self.templates_changed.emit()
 
     def _on_detail_renamed(self, old_name: str, new_name: str):
@@ -2917,7 +2929,7 @@ class TemplatePanel(QWidget):
         sliders: dict[str, QSlider] = {}
         spinboxes: dict[str, QDoubleSpinBox] = {}
 
-        builtin = CVDetector._BUILTIN_CATEGORY_DEFAULTS
+        builtin = CVDetector.CATEGORY_DEFAULTS
         for cat, default_val in cat_map.items():
             cat_color = _CAT_COLORS.get(cat, "#AEAEB2")
             cat_label = _CAT_LABELS.get(cat, cat)

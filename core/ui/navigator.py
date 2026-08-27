@@ -143,7 +143,7 @@ class Navigator:
 
     # ── 弹窗处理 ─────────────────────────────────────────
 
-    _POPUP_TEMPLATES = ["btn_close", "btn_info_close", "btn_click_to_close"]
+    _POPUP_TEMPLATES = ["btn_close", "btn_info_close", "btn_click_to_close", "menu_check"]
 
     def handle_close_popup(self, rect: tuple) -> bool:
         """处理通用弹窗，找到关闭按钮则点击。"""

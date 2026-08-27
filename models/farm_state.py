@@ -1,6 +1,6 @@
 """农场状态数据模型"""
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ActionType(str, Enum):
@@ -21,10 +21,10 @@ class Action(BaseModel):
     """一个待执行的操作"""
     type: str
     target_plot: int = 0
-    click_position: dict = {}  # {"x": 像素x, "y": 像素y}
+    click_position: dict = Field(default_factory=dict)  # {"x": 像素x, "y": 像素y}
     priority: int = 0
     description: str = ""
-    extra: dict = {}  # 额外参数，如种子名称等
+    extra: dict = Field(default_factory=dict)  # 额外参数，如种子名称等
 
 
 class OperationResult(BaseModel):

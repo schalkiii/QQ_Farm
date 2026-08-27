@@ -17,7 +17,7 @@ from loguru import logger
 from models.farm_state import ActionType
 from core.cv_detector import DetectResult
 from core.scene_detector import Scene, identify_scene
-from core.strategies.base import BaseStrategy
+from core.strategies.base import BaseStrategy, SCALES_FAST
 
 try:
     from utils.friend_name_ocr import FriendNameOCR
@@ -47,8 +47,6 @@ FRIEND_NAME_OCR_Y2 = 780
 FRIEND_NAME_ABOVE_Y_WINDOW = 70
 
 MAX_SCROLL_FIND = 8
-
-_SCALES_FAST = [1.0, 0.9, 1.1]
 
 
 def _scale_pos(pos: tuple, img_h: int, img_w: int) -> tuple[int, int]:
@@ -188,7 +186,7 @@ class TargetedPrankStrategy(BaseStrategy):
                 continue
 
             if scene in (Scene.FARM_OVERVIEW, Scene.UNKNOWN):
-                btn = self._find_any_name(dets, ["ui_goto_friend", "btn_haoyou"])
+                btn = self.find_any(dets, ["ui_goto_friend", "btn_haoyou"])
                 if btn:
                     self.click(btn.x, btn.y, f"点击好友按钮({btn.name})")
                 else:
@@ -422,7 +420,7 @@ class TargetedPrankStrategy(BaseStrategy):
         # 第一轮：放草
         weed_remaining = daily_remaining - total
         if weed_remaining > 0:
-            btn = self._find_any_name(found, ["btn_fangcao"])
+            btn = self.find_any(found, ["btn_fangcao"])
             if not btn:
                 logger.info("定点捣乱: 未检测到放草按钮，跳过放草")
             else:
@@ -441,7 +439,7 @@ class TargetedPrankStrategy(BaseStrategy):
 
             _, dets2 = self._open_prank_toolbar(rect, all_lands, preferred=opener)
             if dets2:
-                btn2 = self._find_any_name(dets2, ["btn_fangchong"])
+                btn2 = self.find_any(dets2, ["btn_fangchong"])
                 if btn2:
                     count2 = min(len(target_lands), bug_remaining)
                     logger.info(f"定点捣乱: 放虫拖拽 {count2} 块")
@@ -523,16 +521,6 @@ class TargetedPrankStrategy(BaseStrategy):
         if dropped:
             logger.info(f"定点捣乱: 过滤窗口外地块 {dropped} 块，保留 {len(visible)} 块")
         return visible
-
-    def _detect_prankable_by_template(self, rect: tuple,
-                                      btn_name: str) -> list[DetectResult]:
-        """通过模板匹配检测可捣乱地块（地块上显示的放草/放虫图标）"""
-        cv_img, dets = self._quick_detect(rect, [btn_name])
-        if cv_img is None or not dets:
-            return []
-        results = [d for d in dets if d.name == btn_name]
-        results.sort(key=lambda d: (d.y, d.x))
-        return results
 
     def _get_grid_positions(self, rect: tuple) -> list[DetectResult]:
         """锚点检测 → 推算 4x6=24 网格坐标（与施肥 _detect_lands_by_anchor 一致，含重试）"""
@@ -627,44 +615,6 @@ class TargetedPrankStrategy(BaseStrategy):
             return None, (int(best_left.x), int(best_left.y))
         return None, None
 
-    def _execute_prank(self, targets: list[DetectResult], rect: tuple,
-                       btn_name: str, prank_type: str) -> int:
-        """执行捣乱：点击第一块 → 选择放草/放虫 → 拖拽到其他地块"""
-        if not targets:
-            return 0
-
-        first = targets[0]
-        self.click(first.x, first.y, f"点击地块({prank_type})", ActionType.PRANK)
-        time.sleep(0.5)
-
-        # 检测菜单按钮（优先 btn_fangcao/btn_fangchong，兜底通用菜单按钮）
-        cv_img, dets = self._quick_detect(rect, [
-            "btn_fangcao", "btn_fangchong",
-            "btn_plant", "btn_remove", "btn_fertilize",
-        ])
-        if cv_img is None:
-            self.click_blank(rect)
-            return 0
-
-        prank_btn = self._find_any_name(dets, [btn_name])
-        if not prank_btn:
-            # 兜底：取第一个检测到的菜单按钮位置作为点击目标
-            if dets:
-                prank_btn = dets[0]
-                type_label = "放草" if prank_type == "weed" else "放虫"
-                logger.info(f"定点捣乱: 未检测到 {type_label} 模板，使用兜底位置 ({prank_btn.x},{prank_btn.y})")
-            else:
-                self.click_blank(rect)
-                return 0
-
-        self.click(prank_btn.x, prank_btn.y, f"选择{prank_type}", ActionType.PRANK)
-        time.sleep(0.3)
-
-        if len(targets) <= 1:
-            return 1
-
-        return self._drag_prank_to_lands(first, targets[1:]) + 1
-
     def _drag_prank_to_lands(self, source: DetectResult,
                              targets: list[DetectResult]) -> int:
         """拖拽放草/放虫到多个目标地块"""
@@ -707,7 +657,7 @@ class TargetedPrankStrategy(BaseStrategy):
             if names & {"btn_shop", "btn_warehouse", "ui_goto_friend"}:
                 return True
 
-            home_btn = self._find_any_name(
+            home_btn = self.find_any(
                 dets, ["btn_home", "btn_close", "btn_rw_close"]
             )
             if home_btn:
@@ -729,7 +679,7 @@ class TargetedPrankStrategy(BaseStrategy):
         if cv_img is None:
             return None, []
         detections = self.cv_detector.detect_targeted(
-            cv_img, template_names, scales=_SCALES_FAST
+            cv_img, template_names, scales=SCALES_FAST
         )
         return cv_img, detections
 
@@ -754,10 +704,4 @@ class TargetedPrankStrategy(BaseStrategy):
         )
         self.action_executor.drag(abs_sx, abs_sy, dx, dy, duration=0.3, steps=10)
 
-    def _find_any_name(self, dets: list[DetectResult],
-                       names: list[str]) -> DetectResult | None:
-        name_set = set(names)
-        for d in dets:
-            if d.name in name_set:
-                return d
-        return None
+

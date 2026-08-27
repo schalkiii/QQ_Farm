@@ -12,7 +12,7 @@ from loguru import logger
 from models.farm_state import ActionType
 from core.cv_detector import DetectResult
 from core.scene_detector import Scene, identify_scene
-from core.strategies.base import BaseStrategy
+from core.strategies.base import BaseStrategy, SCALES_FAST
 
 try:
     from utils.friend_name_ocr import FriendNameOCR
@@ -42,8 +42,6 @@ FRIEND_NAME_ABOVE_Y_WINDOW = 40
 
 # 最大滑动查找次数
 MAX_SCROLL_FIND = 8
-
-_SCALES_FAST = [1.0, 0.9, 1.1]
 
 
 def _scale_pos(pos: tuple, img_h: int, img_w: int) -> tuple[int, int]:
@@ -158,7 +156,7 @@ class TargetedStealStrategy(BaseStrategy):
 
             # 农场主页 → 点击好友按钮
             if scene in (Scene.FARM_OVERVIEW, Scene.UNKNOWN):
-                btn = self._find_any_name(dets, ["ui_goto_friend", "btn_haoyou"])
+                btn = self.find_any(dets, ["ui_goto_friend", "btn_haoyou"])
                 if btn:
                     self.click(btn.x, btn.y, f"点击好友按钮({btn.name})")
                 else:
@@ -369,7 +367,7 @@ class TargetedStealStrategy(BaseStrategy):
             if names & {"btn_shop", "btn_warehouse", "ui_goto_friend"}:
                 return True
 
-            home_btn = self._find_any_name(dets, ["btn_home", "btn_close", "btn_rw_close"])
+            home_btn = self.find_any(dets, ["btn_home", "btn_close", "btn_rw_close"])
             if home_btn:
                 self.click(home_btn.x, home_btn.y, f"返回({home_btn.name})")
             else:
@@ -390,7 +388,7 @@ class TargetedStealStrategy(BaseStrategy):
         if cv_img is None:
             return None, []
         detections = self.cv_detector.detect_targeted(
-            cv_img, template_names, scales=_SCALES_FAST
+            cv_img, template_names, scales=SCALES_FAST
         )
         return cv_img, detections
 
@@ -414,9 +412,4 @@ class TargetedStealStrategy(BaseStrategy):
         abs_sy = self.action_executor._window_top + sy
         self.action_executor.drag(abs_sx, abs_sy, dx, dy, duration=0.3, steps=10)
 
-    def _find_any_name(self, dets: list[DetectResult], names: list[str]) -> DetectResult | None:
-        name_set = set(names)
-        for d in dets:
-            if d.name in name_set:
-                return d
-        return None
+

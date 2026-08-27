@@ -212,8 +212,27 @@ class LandScanTask:
         return False
 
     @staticmethod
+    def _close_side_menu(bot_engine, rect: tuple) -> bool:
+        """若侧边菜单打开则点击汉堡收起，恢复农场主界面。"""
+        cv_img = bot_engine._capture_only(rect)
+        if cv_img is None:
+            return False
+        dets = bot_engine.cv_detector.detect_targeted(
+            cv_img, ['menu_check'], scales=[1.0, 0.9, 1.1],
+        )
+        menu = next((d for d in dets if d.name == 'menu_check'), None)
+        if not menu:
+            return False
+        abs_x, abs_y = bot_engine.action_executor.relative_to_absolute(menu.x, menu.y)
+        bot_engine.action_executor.click(abs_x, abs_y)
+        logger.info('地块巡查: 检测到侧边菜单已收起')
+        time.sleep(0.5)
+        return True
+
+    @staticmethod
     def _go_to_main(bot_engine, rect: tuple) -> None:
-        """关闭地块弹窗：对齐 copilot，点固定坐标即可，不做检测循环。"""
+        """关闭地块弹窗：先收起可能打开的侧边菜单，再点固定坐标，不做检测循环。"""
+        LandScanTask._close_side_menu(bot_engine, rect)
         abs_x, abs_y = bot_engine.action_executor.relative_to_absolute(
             LAND_SCAN_GOTO_MAIN_X, LAND_SCAN_GOTO_MAIN_Y,
         )
@@ -318,8 +337,6 @@ class LandScanTask:
         detections = bot_engine.cv_detector.detect_targeted(
             cv_img, ['btn_expand_brand'], scales=[1.0, 0.9, 1.1],
         )
-        if cv_img is None:
-            return cells
 
         brand_det = None
         for det in detections:

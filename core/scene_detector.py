@@ -18,6 +18,7 @@ class Scene(str, Enum):
     LEVEL_UP = "level_up"
     FRIEND_LIST = "friend_list"  # 好友列表页
     INFO_PAGE = "info_page"  # 个人信息页面
+    MENU = "menu"  # 侧边菜单打开（遮挡农场主界面）
     REMOTE_LOGIN = "remote_login"  # 异地登录
     UNKNOWN = "unknown"
 
@@ -78,5 +79,9 @@ def identify_scene(detections: list[DetectResult], detector: CVDetector,
     has_land = any(n.startswith("land_") for n in names)
     if has_land or (names & farm_indicators):
         return Scene.FARM_OVERVIEW
+
+    # 侧边菜单打开：仅 menu_check 可见，农场主界面被遮挡，需收起恢复
+    if "menu_check" in names:
+        return Scene.MENU
 
     return Scene.UNKNOWN

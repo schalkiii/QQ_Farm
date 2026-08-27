@@ -119,12 +119,8 @@ def enable_mica(hwnd: int) -> bool:
         dwm = windll.dwmapi
         extend_frame_into_client_area(hwnd, True)
 
-        # 先设置暗色模式
-        dark_mode = c_int(0)
-        dwm.DwmSetWindowAttribute(
-            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-            byref(dark_mode), sizeof(dark_mode),
-        )
+        # 注意：标题栏暗色模式不再在此强制设置（旧代码写死为浅色，导致深色主题下标题栏发白）。
+        # 由 main_window 在 _apply_window_material 末尾统一调用 set_dark_titlebar() 按主题控制。
 
         if build >= 22523:
             # Win11 22H2+: 使用 SystemBackdropType
@@ -182,6 +178,32 @@ def extend_frame_into_client_area(hwnd: int, enabled: bool) -> bool:
         return result == 0
     except Exception as e:
         logger.debug(f"DwmExtendFrameIntoClientArea 失败: {e}")
+        return False
+
+
+def set_dark_titlebar(hwnd: int, is_dark: bool) -> bool:
+    """按应用主题设置 Windows 原生标题栏的暗色模式（DWMWA_USE_IMMERSIVE_DARK_MODE）。
+
+    qfluentwidgets 的 Theme 只影响 Qt 控件，不影响 Windows 原生标题栏；深色主题下标题栏仍发白
+    即源于此。Win10 1809+(build>=17763) 起支持，更早版本直接忽略。
+    """
+    if not _is_windows():
+        return False
+    try:
+        build = _build_number()
+        if build < 17763:
+            return False
+        dwm = windll.dwmapi
+        value = c_int(1 if is_dark else 0)
+        result = dwm.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), DWMWA_USE_IMMERSIVE_DARK_MODE,
+            byref(value), sizeof(value),
+        )
+        if result != 0:
+            logger.debug(f"set_dark_titlebar 返回 {result}")
+        return result == 0
+    except Exception as e:
+        logger.debug(f"设置暗色标题栏失败: {e}")
         return False
 
 

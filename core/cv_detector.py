@@ -11,6 +11,12 @@ from PIL import Image, ImageSequence
 SUPPORTED_TEMPLATE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif')
 MAX_GIF_TEMPLATE_FRAMES = 16
 
+# 多尺度自适应搜索配置
+BASE_SCALES = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+_FULL_RESCAN_EVERY = 200   # 每 N 次检测强制全尺度扫描，捕捉窗口尺寸漂移
+_TOP_K = 3                 # 收敛后每模板每帧只跑历史最优的前 K 档
+_EMA_ALPHA = 0.3           # 命中置信度指数滑动平均系数
+
 
 @dataclass
 class DetectResult:
@@ -65,18 +71,7 @@ class CVDetector:
         "warehouse_seed": 0.8,  # 新增：仓库种子
         "unknown": 0.8,
     }
-    # 内置默认值（用于"恢复默认"）
-    _BUILTIN_CATEGORY_DEFAULTS: dict[str, float] = {
-        "button": 0.8,
-        "status_icon": 0.8,
-        "crop": 0.8,
-        "ui_element": 0.8,
-        "land": 0.7,
-        "seed": 0.8,
-        "shop": 0.8,
-        "warehouse_seed": 0.8,  # 新增：仓库种子
-        "unknown": 0.8,
-    }
+
 
     def __init__(self, templates_dir: str = "templates"):
         self._templates_dir = templates_dir
@@ -88,6 +83,13 @@ class CVDetector:
         self._thresholds: dict[str, float] = {}
         self._thresholds_file = os.path.join(templates_dir, "thresholds.json")
         self._category_overrides: dict[str, float] = {}  # 用户自定义的类别阈值
+
+        # 多尺度自适应搜索状态
+        self._scale_ema: dict[str, dict[float, float]] = {}   # name -> {scale: 置信度EMA}
+        self._scale_hits: dict[str, dict[float, int]] = {}    # name -> {scale: 命中次数}
+        self._frame: int = 0
+        self._scale_stats_file = os.path.join(templates_dir, "scale_stats.json")
+
         self._load_disabled()
         self._load_thresholds()
 
@@ -151,6 +153,66 @@ class CVDetector:
                 }, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.warning(f"保存模板阈值配置失败: {e}")
+
+    # ── 多尺度自适应搜索 ─────────────────────────────────────
+
+    def _priority_scales(self, name: str, base: list[float] | None = None) -> list[float]:
+        """返回该模板本帧应搜索的尺度顺序。
+
+        收敛后只跑历史命中置信度最高的前 _TOP_K 档（按 EMA 排序），
+        并把最优档排在最前以触发 early-exit；每 _FULL_RESCAN_EVERY 次检测
+        强制全尺度扫描，捕捉窗口尺寸变化（用户改窗口/换显示器）。
+        """
+        base = base or BASE_SCALES
+        if self._frame % _FULL_RESCAN_EVERY == 0:
+            return list(base)
+        ema = self._scale_ema.get(name)
+        if not ema:
+            return list(base)
+
+        def _key(s: float):
+            return (ema.get(s, 0.0), self._scale_hits.get(name, {}).get(s, 0))
+
+        ranked = sorted(base, key=_key, reverse=True)
+        return ranked[:_TOP_K]
+
+    def _record_hit(self, name: str, scale: float, conf: float):
+        """记录某模板在某尺度上的命中，更新 EMA 与计数（只在命中时更新）。"""
+        ema = self._scale_ema.setdefault(name, {})
+        hits = self._scale_hits.setdefault(name, {})
+        ema[scale] = ema.get(scale, 0.0) * (1 - _EMA_ALPHA) + conf * _EMA_ALPHA
+        hits[scale] = hits.get(scale, 0) + 1
+
+    def _load_scale_stats(self):
+        """载入尺度命中统计，实现跨启动热启动。"""
+        try:
+            if os.path.exists(self._scale_stats_file):
+                with open(self._scale_stats_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._scale_ema = {
+                    k: {float(s): float(v) for s, v in d.items()}
+                    for k, d in data.get("ema", {}).items()
+                }
+                self._scale_hits = {
+                    k: {float(s): int(v) for s, v in d.items()}
+                    for k, d in data.get("hits", {}).items()
+                }
+        except Exception:
+            pass
+
+    def _save_scale_stats(self):
+        """持久化尺度命中统计。"""
+        try:
+            data = {
+                "ema": {k: {str(s): v for s, v in d.items()}
+                        for k, d in self._scale_ema.items()},
+                "hits": {k: {str(s): v for s, v in d.items()}
+                         for k, d in self._scale_hits.items()},
+            }
+            with open(self._scale_stats_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception:
+            pass
 
     def get_template_threshold(self, name: str) -> float:
         """获取模板阈值：单模板 > 类别覆盖 > 内置类别默认 > 全局默认 0.8"""
@@ -270,6 +332,7 @@ class CVDetector:
                 count += 1
 
         self._loaded = True
+        self._load_scale_stats()
         msg = f"已加载 {logical_count} 个模板"
         if count != logical_count:
             msg += f"（{count} 个匹配变体）"
@@ -316,6 +379,10 @@ class CVDetector:
         if not self._loaded:
             self.load_templates()
 
+        self._frame += 1
+        if self._frame % _FULL_RESCAN_EVERY == 0:
+            self._save_scale_stats()
+
         results = []
         gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
@@ -346,6 +413,10 @@ class CVDetector:
         if not self._loaded:
             self.load_templates()
 
+        self._frame += 1
+        if self._frame % _FULL_RESCAN_EVERY == 0:
+            self._save_scale_stats()
+
         results = []
         gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
@@ -373,6 +444,10 @@ class CVDetector:
         """只检测指定名称的单个模板"""
         if not self._loaded:
             self.load_templates()
+
+        self._frame += 1
+        if self._frame % _FULL_RESCAN_EVERY == 0:
+            self._save_scale_stats()
 
         gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
         results: list[DetectResult] = []
@@ -463,13 +538,18 @@ class CVDetector:
         if not self._loaded:
             self.load_templates()
 
+        self._frame += 1
+        if self._frame % _FULL_RESCAN_EVERY == 0:
+            self._save_scale_stats()
+
         if not names:
             return []
         
         # 去重
         name_set = set(names)
-        # 精简尺度：只试 3 个尺度而非 5 个
-        fast_scales = scales or [1.0, 0.9, 1.1]
+        # 未显式传入 scales 时回退到 0.8~1.5 全尺度集合
+        # （调用方通常已传入自适应尺度顺序，见 _priority_scales）
+        fast_scales = scales or [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
 
         results = []
         gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
@@ -498,13 +578,16 @@ class CVDetector:
                         roi_img = screenshot[y1:y2, x1:x2]
                         roi_gray = gray_screen[y1:y2, x1:x2]
                         tpl_matches = self._match_template_with_scales_roi(
-                            roi_img, roi_gray, tpl, thresh, fast_scales, offset=(x1, y1)
+                            roi_img, roi_gray, tpl, thresh,
+                            self._priority_scales(tpl["name"], fast_scales),
+                            offset=(x1, y1)
                         )
                         results.extend(tpl_matches)
                 else:
                     # 全图匹配
                     tpl_matches = self._match_template_with_scales(
-                        screenshot, tpl, thresh, fast_scales
+                        screenshot, tpl, thresh,
+                        self._priority_scales(tpl["name"], fast_scales)
                     )
                     results.extend(tpl_matches)
 
@@ -584,8 +667,10 @@ class CVDetector:
                           posinf=-1.0, neginf=-1.0)
 
             locations = np.where(match_result >= threshold)
+            scale_max = 0.0
             for pt_y, pt_x in zip(*locations):
                 confidence = float(match_result[pt_y, pt_x])
+                scale_max = max(scale_max, confidence)
                 # 坐标映射回全图
                 results.append(DetectResult(
                     name=tpl["name"],
@@ -597,7 +682,9 @@ class CVDetector:
                     confidence=confidence,
                 ))
 
-            if scale == 1.0 and any(r.confidence > 0.95 for r in results):
+            if scale_max > 0:
+                self._record_hit(tpl["name"], scale, scale_max)
+            if scale_max > 0.95:
                 break
 
         return results
@@ -668,8 +755,10 @@ class CVDetector:
                           posinf=-1.0, neginf=-1.0)
 
             locations = np.where(match_result >= threshold)
+            scale_max = 0.0
             for pt_y, pt_x in zip(*locations):
                 confidence = float(match_result[pt_y, pt_x])
+                scale_max = max(scale_max, confidence)
                 results.append(DetectResult(
                     name=tpl["name"],
                     category=tpl["category"],
@@ -680,7 +769,9 @@ class CVDetector:
                     confidence=confidence,
                 ))
 
-            if scale == 1.0 and any(r.confidence > 0.95 for r in results):
+            if scale_max > 0:
+                self._record_hit(tpl["name"], scale, scale_max)
+            if scale_max > 0.95:
                 break
 
         return results
@@ -718,7 +809,7 @@ class CVDetector:
             screen_match = gray_screen
             use_color = False
 
-        scales = [1.0, 0.9, 0.8, 1.1, 1.2]
+        scales = self._priority_scales(tpl["name"])
         max_hits = 64 if category == "land" else 8
 
         for scale in scales:
@@ -769,8 +860,10 @@ class CVDetector:
                 pt_ys = locations[0]
                 pt_xs = locations[1]
 
+            scale_max = 0.0
             for pt_y, pt_x in zip(pt_ys, pt_xs):
                 confidence = float(match_result[pt_y, pt_x])
+                scale_max = max(scale_max, confidence)
                 results.append(DetectResult(
                     name=tpl["name"],
                     category=tpl["category"],
@@ -781,7 +874,9 @@ class CVDetector:
                     confidence=confidence,
                 ))
 
-            if scale == 1.0 and any(r.confidence > 0.95 for r in results):
+            if scale_max > 0:
+                self._record_hit(tpl["name"], scale, scale_max)
+            if scale_max > 0.95:
                 break
 
         return results

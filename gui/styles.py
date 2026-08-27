@@ -41,9 +41,52 @@ class Colors:
     SELECTION_BG = "rgba(0, 122, 255, 20)"
 
 
+# ── 主题感知配色 ──────────────────────────────────────────
+# 浅色为 Colors 默认值；深色为对应翻转（背景变深、文字变亮）。
+_DARK_COLORS: dict[str, str] = {
+    "WINDOW_BG": "#1e1e1e",
+    "CARD_BG": "#2c2c2e",
+    "SIDEBAR_BG": "#1e1e1e",
+    "SIDEBAR_ITEM_HOVER": "rgba(255, 255, 255, 10)",
+    "SIDEBAR_ITEM_SELECTED": "#0a84ff",
+    "SIDEBAR_ITEM_SELECTED_BG": "rgba(10, 132, 255, 30)",
+    "TITLEBAR_BG": "#1e1e1e",
+    "INPUT_BG": "#3a3a3c",
+    "INPUT_BG_FOCUS": "#3a3a3c",
+    "PRIMARY": "#0a84ff",
+    "PRIMARY_HOVER": "#409cff",
+    "SUCCESS": "#30d158",
+    "WARNING": "#ff9f0a",
+    "DANGER": "#ff453a",
+    "TEXT": "#f5f5f7",
+    "TEXT_SECONDARY": "#aeaeb2",
+    "TEXT_DIM": "#8e8e93",
+    "BORDER": "rgba(255, 255, 255, 18)",
+    "BORDER_FOCUS": "rgba(10, 132, 255, 160)",
+    "SCROLLBAR_HANDLE": "rgba(255, 255, 255, 40)",
+    "SELECTION_BG": "rgba(10, 132, 255, 40)",
+}
+
+_LIGHT_COLORS: dict[str, str] = {key: getattr(Colors, key) for key in _DARK_COLORS}
+
+
+def apply_theme_colors(is_dark: bool) -> None:
+    """根据主题切换 Colors 的活动配色。
+
+    必须在构建任何使用 Colors.* 的控件之前调用（深色模式才能初始渲染正确），
+    运行时切换主题后也需调用并重新应用样式表。
+    """
+    src = _DARK_COLORS if is_dark else _LIGHT_COLORS
+    for key, value in src.items():
+        if hasattr(Colors, key):
+            setattr(Colors, key, value)
+
+
 # ── 全局样式表 ────────────────────────────────────────────
 
-GLASS_STYLESHEET = f"""
+def build_glass_stylesheet() -> str:
+    """构建全局样式表（依赖当前 Colors 活动配色，随主题刷新）。"""
+    return f"""
 QWidget {{
     color: {Colors.TEXT};
     font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
@@ -279,5 +322,51 @@ def ghost_button_style() -> str:
         QPushButton:hover {{
             background-color: rgba(0, 0, 0, 8);
             color: {Colors.TEXT};
+        }}
+    """
+
+
+# 供 main_window 在主题切换时重建 App 级样式表
+GLASS_STYLESHEET = build_glass_stylesheet()
+
+
+def build_dialog_css() -> str:
+    """对话框/弹窗浅深色自适应样式（依赖当前 Colors 活动配色）。
+
+    从 main.py 迁移而来，原硬编码浅色、会覆盖系统/应用深色主题，导致白字白底。
+    """
+    return f"""
+        QDialog, QMessageBox, QInputDialog {{
+            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
+        }}
+        QInputDialog * {{
+            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
+        }}
+        QInputDialog QFrame {{
+            background-color: {Colors.CARD_BG}; border: none;
+        }}
+        QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel {{
+            color: {Colors.TEXT}; background: transparent;
+        }}
+        QDialog QLineEdit, QInputDialog QLineEdit {{
+            background-color: {Colors.WINDOW_BG}; color: {Colors.TEXT};
+            border: 1px solid {Colors.BORDER}; border-radius: 6px;
+            padding: 6px 10px;
+        }}
+        QDialog QPushButton, QMessageBox QPushButton, QInputDialog QPushButton {{
+            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
+            border: 1px solid {Colors.BORDER}; border-radius: 6px;
+            padding: 6px 20px; min-width: 80px;
+        }}
+        QDialog QPushButton:hover, QMessageBox QPushButton:hover {{
+            background-color: rgba(0, 0, 0, 6);
+        }}
+        QDialog QDialogButtonBox, QMessageBox QDialogButtonBox,
+        QInputDialog QDialogButtonBox {{
+            background-color: {Colors.CARD_BG};
+        }}
+        QDialog QScrollArea, QMessageBox QScrollArea,
+        QInputDialog QScrollArea {{
+            background: transparent;
         }}
     """

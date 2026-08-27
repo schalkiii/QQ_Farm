@@ -7,9 +7,8 @@ from loguru import logger
 
 import cv2
 import numpy as np
-from PIL import Image as PILImage
 
-# FastAPI 相关（延迟导入，避免未安装时报错）
+# FastAPI 相关（延迟导入，避免未安装报错）
 _fastapi = None
 _uvicorn = None
 

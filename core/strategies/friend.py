@@ -14,7 +14,7 @@ from loguru import logger
 from models.farm_state import ActionType
 from core.cv_detector import DetectResult
 from core.scene_detector import Scene, identify_scene
-from core.strategies.base import BaseStrategy
+from core.strategies.base import BaseStrategy, SCALES_FAST
 
 try:
     from utils.friend_name_ocr import FriendNameOCR
@@ -65,8 +65,6 @@ _ALL_FRIEND_TEMPLATES = [
     # 好友请求
     "btn_friend_apply", "btn_friend_agreed",
 ]
-
-_SCALES_FAST = [1.0, 0.9, 1.1]
 
 
 def _scale_pos(pos: tuple, img_h: int, img_w: int) -> tuple[int, int]:
@@ -223,7 +221,7 @@ class FriendStrategy(BaseStrategy):
 
             # 农场主页或未知场景 → 模板匹配找好友按钮
             if scene in (Scene.FARM_OVERVIEW, Scene.UNKNOWN):
-                btn = self._find_any_name(dets, ["ui_goto_friend", "btn_haoyou"])
+                btn = self.find_any(dets, ["ui_goto_friend", "btn_haoyou"])
                 if btn:
                     self.click(btn.x, btn.y, f"点击好友按钮({btn.name})")
                 else:
@@ -375,7 +373,7 @@ class FriendStrategy(BaseStrategy):
                 if btn:
                     self.click(btn.x, btn.y, f"访问好友(Y匹配{first_target.name})")
                 else:
-                    btn = self._find_any_name(dets, ["btn_visit_first"])
+                    btn = self.find_any(dets, ["btn_visit_first"])
                     if btn:
                         self.click(btn.x, btn.y, "访问好友")
                     else:
@@ -741,7 +739,7 @@ class FriendStrategy(BaseStrategy):
                 logger.info("已返回主页")
                 return True
 
-            home_btn = self._find_any_name(dets, ["btn_home", "btn_close", "btn_rw_close", "btn_dw_back"])
+            home_btn = self.find_any(dets, ["btn_home", "btn_close", "btn_rw_close", "btn_dw_back"])
             if home_btn:
                 self.click(home_btn.x, home_btn.y, f"返回({home_btn.name})")
             else:
@@ -763,7 +761,7 @@ class FriendStrategy(BaseStrategy):
         if cv_img is None:
             return None, []
         detections = self.cv_detector.detect_targeted(
-            cv_img, _ALL_FRIEND_TEMPLATES, scales=_SCALES_FAST
+            cv_img, _ALL_FRIEND_TEMPLATES, scales=SCALES_FAST
         )
         det_names = [f"{d.name}({d.confidence:.0%})" for d in detections[:10]]
         logger.debug(f"好友农场检测: {len(detections)}个 | {', '.join(det_names)}")
@@ -777,7 +775,7 @@ class FriendStrategy(BaseStrategy):
         if cv_img is None:
             return None, []
         detections = self.cv_detector.detect_targeted(
-            cv_img, template_names, scales=_SCALES_FAST
+            cv_img, template_names, scales=SCALES_FAST
         )
         return cv_img, detections
 
@@ -789,21 +787,13 @@ class FriendStrategy(BaseStrategy):
                 return cv_img
         return None
 
-    def _find_any_name(self, dets: list[DetectResult],
-                       names: list[str]) -> DetectResult | None:
-        name_set = set(names)
-        for d in dets:
-            if d.name in name_set:
-                return d
-        return None
-
     # ── 旧接口兼容 ──────────────────────────────────────────────
 
     def try_friend_help(self, rect: tuple,
                         detections: list[DetectResult]) -> list[str]:
         if self.stopped:
             return []
-        btn = self._find_any_name(detections, ["btn_friend_help"])
+        btn = self.find_any(detections, ["btn_friend_help"])
         if not btn:
             return []
         self.click(btn.x, btn.y, "好友求助")

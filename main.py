@@ -88,69 +88,24 @@ def main():
         config = AppConfig.load(config_path)
         logger.info("使用默认配置")
 
-    # 启动GUI — 禁用系统暗色主题检测，强制使用 Fusion 浅色
+    # 控制面板 UI 缩放：planting.ui_scale>0 时用配置值，否则跟随系统缩放比
+    # （QT_ENABLE_HIGHDPI_SCALING=0 已禁用 Qt 自动 DPI 缩放，此处手动乘上系统缩放，
+    # 避免高 DPI 屏上控制面板过小）。仅影响本程序 UI，不影响游戏窗口采集坐标。
+    from utils.display import get_display_info
+    ui_scale = config.planting.ui_scale
+    if ui_scale <= 0:
+        ui_scale = get_display_info().scale_factor
+    if ui_scale and ui_scale > 0:
+        os.environ['QT_SCALE_FACTOR'] = str(ui_scale)
+
+    # 启动GUI — 禁用系统暗色主题检测，由 qfluentwidgets 统一管理主题
     QApplication.setDesktopSettingsAware(False)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    # 强制设置 Fusion 调色板为浅色，覆盖 Windows 暗色主题
-    from PyQt6.QtGui import QPalette, QColor
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#f5f5f7"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#1d1d1f"))
-    palette.setColor(QPalette.ColorRole.Base, QColor("#f5f5f7"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#1d1d1f"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#1d1d1f"))
-    palette.setColor(QPalette.ColorRole.Button, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#1d1d1f"))
-    palette.setColor(QPalette.ColorRole.BrightText, QColor("#1d1d1f"))
-    palette.setColor(QPalette.ColorRole.Link, QColor("#007AFF"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#007AFF"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#aeaeb2"))
-    app.setPalette(palette)
-
-    # 给所有 QDialog/QMessageBox/QInputDialog 设置浅色背景（覆盖系统暗色主题）
-    from PyQt6.QtWidgets import QDialog
-    from gui.styles import Colors
-    _dialog_css = f"""
-        QDialog, QMessageBox, QInputDialog {{
-            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
-        }}
-        QInputDialog * {{
-            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
-        }}
-        QInputDialog QFrame {{
-            background-color: {Colors.CARD_BG}; border: none;
-        }}
-        QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel {{
-            color: {Colors.TEXT}; background: transparent;
-        }}
-        QDialog QLineEdit, QInputDialog QLineEdit {{
-            background-color: {Colors.WINDOW_BG}; color: {Colors.TEXT};
-            border: 1px solid rgba(0,0,0,25); border-radius: 6px;
-            padding: 6px 10px;
-        }}
-        QDialog QPushButton, QMessageBox QPushButton, QInputDialog QPushButton {{
-            background-color: {Colors.CARD_BG}; color: {Colors.TEXT};
-            border: 1px solid rgba(0,0,0,25); border-radius: 6px;
-            padding: 6px 20px; min-width: 80px;
-        }}
-        QDialog QPushButton:hover, QMessageBox QPushButton:hover {{
-            background-color: rgba(0,0,0,6);
-        }}
-        QDialog QDialogButtonBox, QMessageBox QDialogButtonBox,
-        QInputDialog QDialogButtonBox {{
-            background-color: {Colors.CARD_BG};
-        }}
-        QDialog QScrollArea, QMessageBox QScrollArea,
-        QInputDialog QScrollArea {{
-            background: transparent;
-        }}
-    """
-    app.setStyleSheet(app.styleSheet() + _dialog_css)
+    # 主题配色与对话框样式由 gui/main_window 的 _apply_global_settings 统一管理
+    # （依据用户选择的 浅色/深色/跟随系统，并对照 qfluentwidgets 主题）。
+    # 此处不再硬编码浅色调色板与对话框 CSS，避免覆盖深色模式导致白字白底。
 
     # 安装全局滚轮过滤器，防止鼠标滚轮意外修改 SpinBox 数值
     wheel_filter = _NoWheelInputFilter()

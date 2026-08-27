@@ -69,7 +69,8 @@ page_mall.links = {
 
 page_menu.links = {
     "mail": ["menu_goto_mail", "btn_mail_entry"],
-    "main": ["btn_close", "menu_goto_main"],
+    # 收起侧边菜单：点击汉堡 menu_check 即可回到主页（menu_goto_main 模板未提供，不可依赖）
+    "main": ["menu_check", "btn_close"],
 }
 
 page_mail.links = {

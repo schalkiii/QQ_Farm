@@ -54,10 +54,6 @@ class FeaturesConfig(BaseModel):
     friend: FriendConfig = Field(default_factory=FriendConfig)  # 好友操作配置
 
 
-class SellConfig(BaseModel):
-    """出售配置 — 仅支持批量全部出售"""
-
-
 class SafetyConfig(BaseModel):
     random_delay_min: float = 0.1
     random_delay_max: float = 0.3
@@ -135,7 +131,7 @@ class TaskScheduleItemConfig(BaseModel):
     daily_time: str = "00:01"
     next_run: str = ""                 # ISO 格式 datetime 字符串
     failure_interval_seconds: int = 60  # 失败后间隔
-    features: dict[str, Any] = {}
+    features: dict[str, Any] = {}  # pyright: ignore[reportExplicitAny]
 
 
 class ExecutorConfig(BaseModel):
@@ -169,12 +165,14 @@ def resolve_task_min_interval_seconds(executor_cfg: ExecutorConfig) -> int:
 
 class PlantingConfig(BaseModel):
     strategy: PlantMode = PlantMode.BEST_EXP_RATE
+    ui_scale: float = 0.0  # 控制面板 UI 缩放比（0=跟随系统缩放，>0 时强制使用该值）
     preferred_crop: str = "椰子"  # strategy=preferred 时使用
     secondary_crop: str = ""       # strategy=preferred 时，首选无种子/无法播种后的次级作物
     tertiary_crop: str = ""        # strategy=preferred 时，次级也无种子后的三级作物
     player_level: int = 69
     window_width: int = 581
     window_height: int = 1054
+    auto_fit_window: bool = True  # 启动时按桌面分辨率自动推算窗口尺寸（保持竖屏比例）
     game_shortcut_path: str = ""  # 游戏快捷方式路径，用于自动启动
     select_account_keyword: str = ""  # 选择账号窗口匹配关键词（QQ号），如 "1234560000"
     last_hwnd: int = 0                  # 上次启动时的游戏窗口句柄（用于重启后窗口匹配）
@@ -219,7 +217,7 @@ class LandProfileConfig(BaseModel):
 
 class LandConfig(BaseModel):
     profile: LandProfileConfig = Field(default_factory=LandProfileConfig)
-    plots: list[dict] = []  # [{plot_id, level, maturity_countdown, need_upgrade, need_planting}]
+    plots: list[dict[str, Any]] = []  # [{plot_id, level, maturity_countdown, need_upgrade, need_planting}]  # pyright: ignore[reportExplicitAny]
 
 
 class AppConfig(BaseModel):
@@ -246,8 +244,8 @@ class AppConfig(BaseModel):
     def load(cls, path: str = "config.json") -> "AppConfig":
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            config = cls(**data)
+                data = json.load(f)  # pyright: ignore[reportAny]
+            config = cls(**data)  # pyright: ignore[reportAny]
         else:
             config = cls()
         config._config_path = path
@@ -357,14 +355,6 @@ class AppConfig(BaseModel):
             "share": TaskScheduleItemConfig(
                 enabled=False, priority=30, trigger=TaskTriggerType.DAILY,
                 daily_time="00:10",
-            ),
-            "repair": TaskScheduleItemConfig(
-                enabled=False, priority=3, trigger=TaskTriggerType.INTERVAL,
-                interval_seconds=300, failure_interval_seconds=60,
-            ),
-            "restart": TaskScheduleItemConfig(
-                enabled=False, priority=2, trigger=TaskTriggerType.INTERVAL,
-                interval_seconds=1800, failure_interval_seconds=300,
             ),
             "捣乱": TaskScheduleItemConfig(
                 enabled=False, priority=25, trigger=TaskTriggerType.INTERVAL,

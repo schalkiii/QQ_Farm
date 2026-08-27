@@ -358,7 +358,7 @@ def detect_locked_warehouse_slot_indexes(
         return set()
 
     thresholds = {name: max(0.78, float(cv_detector.get_template_threshold(name))) for name in names}
-    hits = cv_detector.detect_targeted(screenshot, names, thresholds=thresholds, scales=[0.9, 1.0, 1.1])
+    hits = cv_detector.detect_targeted(screenshot, names, thresholds=thresholds, scales=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5])
     if not hits:
         return set()
 
@@ -409,7 +409,7 @@ def scan_warehouse_seed_page(
         screenshot,
         [template_name],
         thresholds={template_name: threshold},
-        scales=[0.85, 0.9, 1.0, 1.1, 1.2],
+        scales=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
         roi_map=roi_map,
     )
     for hit in hits:

@@ -6,9 +6,9 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QStackedWidget,
-    QMessageBox, QInputDialog,
+    QMessageBox, QInputDialog, QApplication,
 )
-from PyQt6.QtCore import Qt, QSettings, QTimer
+from PyQt6.QtCore import Qt, QSettings, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
 from qfluentwidgets import Theme, setTheme
 from PIL import Image
@@ -19,7 +19,10 @@ from models.config import AppConfig
 from core.bot_engine import BotEngine
 from core.instance_manager import InstanceManager, InstanceSession
 from core.cross_instance_bus import CrossInstanceBus
-from gui.styles import Colors, GLASS_STYLESHEET, glass_button_style
+from gui.styles import (
+    Colors, GLASS_STYLESHEET, glass_button_style,
+    build_glass_stylesheet, build_dialog_css, apply_theme_colors,
+)
 from gui.widgets.sidebar import Sidebar
 from gui.widgets.log_panel import LogPanel
 from gui.widgets.status_panel import StatusPanel
@@ -30,8 +33,30 @@ from gui.widgets.land_detail_panel import LandDetailPanel
 from gui.widgets.task_panel import TaskPanel
 from gui.widgets.feature_panel import FeaturePanel
 from gui.widgets.global_settings_panel import GlobalSettingsPanel
-from gui.acrylic import disable_blur, enable_blur
+from gui.acrylic import disable_blur, enable_blur, set_dark_titlebar
 from utils.logger import get_log_signal
+
+
+class _EngineOpThread(QThread):
+    """后台执行引擎重操作（start/stop）。
+
+    engine.start() 内含 time.sleep 等待窗口自适应、engine.stop() 会循环等待运行中的
+    Worker 线程结束（可能数秒），若直接在 GUI 线程调用会冻结界面（开始/停止/关闭卡顿）。
+    因此统一放到此线程执行，结束信号回到 GUI 线程更新按钮。
+    """
+
+    def __init__(self, target, parent=None):
+        super().__init__(parent)
+        self._target = target
+        self.result = None
+        self.exc = False
+
+    def run(self):
+        try:
+            self.result = self._target()
+        except Exception:  # noqa: BLE001
+            self.exc = True
+            logger.exception("引擎后台操作异常")
 
 
 class MainWindow(QMainWindow):
@@ -43,9 +68,12 @@ class MainWindow(QMainWindow):
         self._app_settings = QSettings("QQFarmVisionBot", "QQFarmVisionBot")
         self._global_theme_mode = self._load_theme_mode()
         self._global_mica_enabled = self._load_mica_enabled()
+        # 在构建任何使用 Colors.* 的控件前应用主题感知配色，保证深色模式初始渲染正确
+        apply_theme_colors(self._global_theme_mode == "dark")
         self._central: QWidget | None = None
         self._content_area: QWidget | None = None
         self._instance_sidebar: InstanceSidebar | None = None
+        self._pending_screenshot: Image.Image | None = None
         self._apply_material_backing(self._global_mica_enabled)
         
         # 跨实例通讯消息总线（所有引擎共享）
@@ -77,7 +105,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 680)
         self.resize(1200, 740)
 
-        self.setStyleSheet(GLASS_STYLESHEET)
+        self.setStyleSheet(build_glass_stylesheet())
 
         central = QWidget()
         central.setObjectName("mainCentral")
@@ -155,6 +183,12 @@ class MainWindow(QMainWindow):
         self._status_refresh_timer.setInterval(500)
         self._status_refresh_timer.timeout.connect(self._refresh_status)
         self._status_refresh_timer.start()
+
+        # 截图预览合并刷新：限频到 ~10fps，避免高频截图在 GUI 线程逐帧缩放导致卡顿
+        self._screenshot_timer = QTimer(self)
+        self._screenshot_timer.setInterval(100)
+        self._screenshot_timer.timeout.connect(self._flush_screenshot)
+        self._screenshot_timer.start()
 
         content_layout.addWidget(self._stack)
         body.addWidget(content, 1)
@@ -320,6 +354,13 @@ class MainWindow(QMainWindow):
         else:
             setTheme(Theme.AUTO)
 
+        # 主题色随主题切换，并重建全局样式表（容器/对话框配色刷新）
+        apply_theme_colors(theme == "dark")
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(build_glass_stylesheet() + build_dialog_css())
+        self.setStyleSheet(build_glass_stylesheet())
+
         if persist:
             self._app_settings.setValue("global/theme_mode", self._global_theme_mode)
             self._app_settings.setValue("global/mica_enabled", self._global_mica_enabled)
@@ -332,22 +373,24 @@ class MainWindow(QMainWindow):
 
     def _apply_material_backing(self, enabled: bool):
         enabled = bool(enabled)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, enabled)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, enabled)
+        # Mica/Acrylic 依赖 DWM 在窗口背后绘制，必须保持窗口不透明：
+        # 不能设置 WA_TranslucentBackground，否则变成分层窗口导致云母/亚克力失效。
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
         self.setAutoFillBackground(not enabled)
         if self._central:
-            self._central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, enabled)
-            self._central.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, enabled)
+            self._central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+            self._central.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
             self._central.setAutoFillBackground(False)
         if self._content_area:
-            self._content_area.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, enabled)
+            self._content_area.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
             self._content_area.setAutoFillBackground(False)
 
     def _apply_central_background(self):
         if not self._central:
             return
         if self._global_mica_enabled:
-            bg = "rgba(245, 245, 247, 96)"
+            bg = "transparent"
         else:
             bg = Colors.WINDOW_BG
         self._central.setStyleSheet(f"""
@@ -372,6 +415,8 @@ class MainWindow(QMainWindow):
                 logger.warning("云母效果启用失败，已使用半透明背景兜底")
         else:
             disable_blur(hwnd)
+        # 让 Windows 原生标题栏跟随应用主题（Mica 旧逻辑会强制浅色，导致深色下标题栏发白）
+        set_dark_titlebar(hwnd, self._global_theme_mode == "dark")
 
     # ── 导航切换 ────────────────────────────────────────────
 
@@ -381,39 +426,65 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(idx)
         if key == "status":
             self._refresh_status()
+        elif key == "template":
+            # 首次进入模板页时按需加载（延迟加载的兜底，避免空白等待）
+            self._template_panel.ensure_templates_loaded()
 
     # ── 截图更新 ────────────────────────────────────────────
 
     def _update_screenshot(self, image: Image.Image):
-        """更新截图预览"""
+        """更新截图预览（仅在合并刷新定时器触发时调用，避免每帧同步缩放卡顿）"""
         try:
             image = image.convert("RGB")
             data = image.tobytes("raw", "RGB")
             qimg = QImage(data, image.width, image.height,
                           3 * image.width, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qimg)
+            # 预览尺寸小，用快速缩放即可（SmoothTransformation 在 GUI 线程逐帧开销大）
             scaled = pixmap.scaled(
                 self._screenshot_label.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
+                Qt.TransformationMode.FastTransformation)
             self._screenshot_label.setPixmap(scaled)
         except Exception:
             pass
 
     def _on_screenshot_updated(self, instance_id: str, image: Image.Image):
-        """截图更新：只显示当前选中实例的截图"""
+        """截图更新：仅缓存最新一帧，由合并定时器限频刷新（~10fps）"""
         if instance_id == self._current_instance_id:
-            self._update_screenshot(image)
+            self._pending_screenshot = image
+
+    def _flush_screenshot(self):
+        """合并定时器回调：只渲染最新一帧截图，丢弃中间帧"""
+        image = self._pending_screenshot
+        if image is None:
+            return
+        self._pending_screenshot = None
+        self._update_screenshot(image)
 
     # ── 控制按钮 ────────────────────────────────────────────
 
     def _on_start(self):
         self._refresh_claimed_hwnds()
-        if self.engine.start():
+        # 先禁用按钮避免重复点击；实际启动在后台线程执行（含 time.sleep 等待窗口自适应）
+        self._btn_start.setEnabled(False)
+        self._btn_pause.setEnabled(False)
+        self._btn_stop.setEnabled(False)
+        thread = _EngineOpThread(self.engine.start, self)
+        thread.finished.connect(lambda: self._on_start_done(thread))
+        thread.start()
+
+    def _on_start_done(self, thread):
+        ok = bool(thread.result) and not thread.exc
+        if ok:
             self._btn_start.setEnabled(False)
             self._btn_pause.setEnabled(True)
             self._btn_stop.setEnabled(True)
-            self._refresh_status()
+        else:
+            self._btn_start.setEnabled(True)
+            self._btn_pause.setEnabled(False)
+            self._btn_stop.setEnabled(False)
+        self._refresh_status()
 
     def _on_pause(self):
         if self._btn_pause.text() == "暂停":
@@ -426,11 +497,16 @@ class MainWindow(QMainWindow):
             self._refresh_status()
 
     def _on_stop(self):
-        self.engine.stop()
-        self._btn_start.setEnabled(True)
+        # 后台停止：engine.stop() 会等待运行中的 Worker 结束，可能耗时数秒，必须移出 GUI 线程
+        self._btn_start.setEnabled(False)
         self._btn_pause.setEnabled(False)
         self._btn_stop.setEnabled(False)
-        self._btn_pause.setText("暂停")
+        thread = _EngineOpThread(self.engine.stop, self)
+        thread.finished.connect(lambda: self._on_stop_done(thread))
+        thread.start()
+
+    def _on_stop_done(self, thread):
+        # 引擎停止后会通过 state_changed(idle) 由 _on_state_changed 恢复按钮；这里仅刷新
         self._refresh_status()
 
     def _on_state_changed(self, state: str):
@@ -604,7 +680,11 @@ class MainWindow(QMainWindow):
         if self._btn_start.isEnabled():
             # Bot 未运行，忽略
             return
-        self.engine.stop()
+        thread = _EngineOpThread(self.engine.stop, self)
+        thread.finished.connect(lambda: self._on_hotkey_stop_done(thread))
+        thread.start()
+
+    def _on_hotkey_stop_done(self, thread):
         self._btn_start.setEnabled(True)
         self._btn_pause.setEnabled(False)
         self._btn_stop.setEnabled(False)
@@ -826,7 +906,7 @@ class MainWindow(QMainWindow):
         # 更新模板面板
         self._template_panel._detector = new_engine.cv_detector
         self._template_panel._window_keyword = session.config.window_title_keyword or "QQ经典农场"
-        self._template_panel._load_templates()
+        self._template_panel._load_templates(force=True)
 
         # 更新地块详情面板
         self._land_panel.set_config(session.config)
@@ -1072,12 +1152,20 @@ class MainWindow(QMainWindow):
             self.engine.log_message.emit(f"✓ 已停止 {stopped} 个实例")
 
     def closeEvent(self, event):
-        """关闭事件：停止所有引擎"""
+        """关闭事件：后台停止所有引擎，立即关闭窗口避免点击叉后卡住"""
         self.unregister_hotkeys()
-        # 停止当前引擎
-        self.engine.stop()
-        # 停止所有其他引擎
-        for eid, eng in self._engines.items():
+        thread = _EngineOpThread(self._stop_all_engines, self)
+        thread.start()
+        event.accept()
+
+    def _stop_all_engines(self):
+        try:
+            self.engine.stop()
+        except Exception:  # noqa: BLE001
+            logger.exception("停止当前引擎失败")
+        for eid, eng in list(self._engines.items()):
             if eng != self.engine:
-                eng.stop()
-        super().closeEvent(event)
+                try:
+                    eng.stop()
+                except Exception:  # noqa: BLE001
+                    logger.exception("停止实例引擎失败")

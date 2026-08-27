@@ -28,6 +28,7 @@ from loguru import logger
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from models.config import AppConfig, PlantMode, RunMode, TaskScheduleItemConfig
+from utils.display import compute_window_size
 from models.farm_state import ActionType
 from models.game_data import get_best_crop_for_level, get_crop_by_name, get_latest_crop_for_level, format_grow_time
 from core.window_manager import WindowManager
@@ -502,6 +503,17 @@ class BotEngine(QObject):
                 self.config.save()
             except Exception:
                 pass
+
+        # 按桌面分辨率自动推算游戏窗口尺寸（保持竖屏原生比例），仅当偏离时写回配置
+        if self.config.planting.auto_fit_window:
+            new_w, new_h = compute_window_size()
+            if new_w != self.config.planting.window_width or new_h != self.config.planting.window_height:
+                self.config.planting.window_width = new_w
+                self.config.planting.window_height = new_h
+                try:
+                    self.config.save()
+                except Exception:
+                    pass
 
         w, h = self.config.planting.window_width, self.config.planting.window_height
         if w > 0 and h > 0:
@@ -1220,6 +1232,9 @@ class BotEngine(QObject):
                 # 处理弹窗，确保不会卡住
                 if scene == Scene.POPUP:
                     self.popup.handle_popup(detections)
+                elif scene == Scene.MENU:
+                    # 侧边菜单打开遮挡农场，点击汉堡收起
+                    self._task_menu_close({"rect": rect, "detections": detections, "scene": scene})
                 elif scene == Scene.INFO_PAGE:
                     info_close = self.popup.find_any(detections, ["btn_close", "btn_info_close", "btn_rw_close"])
                     if info_close:
@@ -1259,6 +1274,8 @@ class BotEngine(QObject):
         _f = self.config.features  # 缩短引用
         farm_tasks = [
             ("Popup",   lambda: True,                       lambda s: s in (Scene.POPUP, Scene.INFO_PAGE, Scene.SHOP_PAGE), lambda ctx: self._task_popup(ctx)),
+            # 侧边菜单打开时优先收起，否则农场被遮挡导致后续全部失效
+            ("MenuClose", lambda: True,                     lambda s: s == Scene.MENU,                                  lambda ctx: self._task_menu_close(ctx)),
             ("Harvest", lambda: _f.auto_harvest,             lambda s: s == _FARM_OVERVIEW,                                 lambda ctx: self._task_harvest(ctx)),
             ("Maintain",lambda: _f.auto_maintain,                    lambda s: s == _FARM_OVERVIEW,                                 lambda ctx: self._task_maintain(ctx)),
             ("Plant",   lambda: _f.auto_plant and not self._plant_done, lambda s: s == _FARM_OVERVIEW,                       lambda ctx: self._task_plant(ctx)),
@@ -1463,6 +1480,25 @@ class BotEngine(QObject):
             self.scheduler._remote_login_cooldown_until = 0.0
 
     # --- 任务执行器回调方法 ---
+
+    def _task_menu_close(self, context: dict) -> bool:
+        """侧边菜单打开时点击汉堡按钮收起，恢复农场主界面。
+
+        侧边菜单(菜单)打开会遮挡农场，导致 btn_land_right/left、
+        btn_harvest、btn_一键务农 等全部不可见而检测失败。收起后下一轮
+        即可回到 FARM_OVERVIEW 正常执行。
+        """
+        rect = context.get("rect")
+        if not rect:
+            return False
+        cv_img, dets = self.popup.quick_detect(rect, ["menu_check"], scales=[1.0, 0.9, 1.1])
+        if cv_img is None:
+            return False
+        menu = self.popup.find_by_name(dets, "menu_check")
+        if menu:
+            self.popup.click(menu.x, menu.y, "收起侧边菜单", ActionType.CLOSE_POPUP)
+            return True
+        return False
 
     def _task_popup(self, context: dict) -> bool:
         """处理弹窗 - 使用快速检测优化"""
