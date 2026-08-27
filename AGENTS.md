@@ -31,7 +31,7 @@ pyinstaller build.spec                # 构建 EXE
 │  expand → task → friend → gift → targeted    │
 ├──────────────────────────────────────────────┤
 │  图像识别层                                  │
-│  cv_detector.py (模板匹配, 多尺度 0.8x~1.3x) │
+│  cv_detector.py (模板匹配, 多尺度 0.8x~1.5x, 自适应收敛) │
 │  scene_detector.py (场景识别状态机)          │
 ├──────────────────────────────────────────────┤
 │  窗口控制 + 操作执行                         │

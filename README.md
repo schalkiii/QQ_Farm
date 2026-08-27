@@ -2,7 +2,7 @@
 
 基于 OpenCV 视觉识别的 QQ 经典农场自动化工具。纯本地运行，不读取内存、不修改数据包，支持 PyQt6 GUI、多实例、多窗口后台运行、Web 控制面板、老板键和大小号跨实例协作。
 
-> **项目来源**：基于 [Z7ANN/qq-farm-auto](https://github.com/Z7ANN/qq-farm-auto) 修改，参考 [megumiss/qq-farm-copilot](https://github.com/megumiss/qq-farm-copilot) / [rainnight6/qq-farm-copilot](https://github.com/rainnight6/qq-farm-copilot) 的部分思路。
+> **项目来源**：基于 [LuckyTiger12138/QQ_Farm](https://github.com/LuckyTiger12138/QQ_Farm) 修改，参考 [megumiss/qq-farm-copilot](https://github.com/megumiss/qq-farm-copilot) / [rainnight6/qq-farm-copilot](https://github.com/rainnight6/qq-farm-copilot) 的部分思路。
 
 **仓库**：[GitHub](https://github.com/LuckyTiger12138/QQ_Farm) · [Gitee](https://gitee.com/luckytiger12138/qq-farm)
 
@@ -27,12 +27,29 @@
 | **模板管理** | 截图绑定 hwnd、多边形采集、阈值调节、批量测试、种子批量导入、采集图标支持 |
 | **构建发布** | PyInstaller 打包、GitHub Actions 自动构建发布、自定义 Release Notes |
 
+## 相对上游仓库的增强
+
+本项目基于 [LuckyTiger12138/QQ_Farm](https://github.com/LuckyTiger12138/QQ_Farm) 修改，并参考 [megumiss/qq-farm-copilot](https://github.com/megumiss/qq-farm-copilot) / [rainnight6/qq-farm-copilot](https://github.com/rainnight6/qq-farm-copilot) 的部分思路。相较上游，本仓库在以下方向做了增强或新增（各版本细节见 [CHANGELOG](CHANGELOG.md)，架构优化建议见 [ARCH_OPTIMIZATION.md](ARCH_OPTIMIZATION.md)）：
+
+- **多实例与隔离**：每个 QQ/微信窗口独立 `BotEngine`、配置、日志、截图目录；窗口占用保护避免多开互相抢占。
+- **任务调度系统**：基于优先级的 `TaskExecutor`，支持 interval/daily 触发、失败重试、启用时段、配置热更新与跨实例动态任务注入。
+- **大小号跨实例协作**：`CrossInstanceBus` 消息总线实现"大号成熟广播 → 小号定点偷菜"与"跨实例捣乱"，含去重与中文 task key `捣乱`。
+- **地块巡查与成熟预估**：`land_scan` 两阶段滑动扫描 + OCR 采集等级/成熟倒计时，供大小号通讯；地块详情面板给出升级预估。
+- **自动买种增强**：`goods` 价格元数据 + OCR 名称消歧 + 仓库 3×5 格复查与失败冷却的安全阀。
+- **窗口监控与异常恢复**：黑屏、断网/异地登录、远程登录检测，窗口关闭自动重启；多 QQ 下 OCR 自动选择账号。
+- **界面与体验**：PyQt6 GUI（任务面板/模板管理/地块详情/全局设置）、可选 FastAPI Web 控制面板、老板键与全局热键。
+- **GUI 性能**：模板列表延迟加载、截图与日志合并限频刷新、开始/停止/关闭卡顿修复（后台线程）。
+- **深色与外观**：原生标题栏跟随深色主题（Mica/Acrylic 暗色模式）。
+- **显示适配**：窗口尺寸自动锁定竖屏原生比例，模板匹配容差放大到 **0.8~1.5**，支持 32:9 带鱼屏等任意比例；并引入**多尺度匹配自适应收敛**（按模板历史命中动态收敛尺度顺序，免去重采模板且接近原生速度）。
+- **调试诊断**：Debug 日志 + `task_trace_*.jsonl` 调度诊断。
+- **工程化**：PyInstaller 一键打包、GitHub Actions 自动构建发布、自定义 Release Notes。
+
 ## 环境要求
 
 - Windows 10/11
 - Python 3.10+
 - PC 端 QQ 或微信，手动打开或配置快捷方式启动 QQ 经典农场小程序
-- 建议 16:9 显示器；16:10 或非标准比例显示器可能存在坐标精度损失
+- 任意比例显示器（含 32:9 带鱼屏）：游戏窗口会按桌面工作区高度自动锁定竖屏原生比例，模板匹配稳定
 
 ## 快速开始
 
@@ -80,6 +97,25 @@ python tools/import_seeds.py
 点击「开始」后程序会：
 
 1. 找到或启动游戏窗口。
+
+### 窗口尺寸与界面缩放
+
+游戏窗口默认**自动适配显示器**：启动时按桌面工作区高度锁定竖屏原生比例（`581:1054`）等比放大，并限制在模板匹配容差（0.8~1.5）内，
+因此无论 16:9、16:10 还是 32:9 带鱼屏都能稳定匹配。相关配置在 `planting` 段：
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `auto_fit_window` | `true` | 启动时按桌面分辨率自动推算 `window_width/height`，保持竖屏比例 |
+| `window_width` / `window_height` | `581` / `1054` | 仅在 `auto_fit_window=false` 时手动生效 |
+| `ui_scale` | `0.0` | 控制面板 UI 缩放比；`0` 表示跟随系统缩放比（如 125% 屏自动放大），`>0` 时强制使用该值 |
+
+> 仅影响本程序控制面板与游戏窗口渲染尺寸，不影响后台截图的采集坐标（按 hwnd 真实像素截图）。
+
+### GUI 性能说明
+
+- 模板管理页模板列表**延迟加载**：启动不再同步构建 700+ 缩略图，进入该页或启动 600ms 后自动加载。
+- 截图预览与运行日志均做了**合并限频刷新**，避免高频更新导致控制面板卡顿。
+- 若启用「云母/亚克力」毛玻璃效果后仍感觉卡顿，可关闭全局设置中的毛玻璃开关（DWM 模糊在频繁重绘时开销较大）。
 2. 调整窗口位置并绑定 hwnd。
 3. 循环执行：截屏 → 模板匹配 → 场景识别 → 策略决策 → 前台/后台点击。
 

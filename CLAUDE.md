@@ -153,7 +153,7 @@ Scene 枚举值: FARM_OVERVIEW, FRIEND_FARM, PLOT_MENU, SEED_SELECT, SHOP_PAGE, 
 
 - **模板加载**: 从 `templates/` 目录加载，文件名前缀决定类别
 - **GIF 模板**: 支持将 GIF 拆成有限多帧匹配变体，对外仍按同一个模板名使用
-- **多尺度检测**: 0.8x ~ 1.3x 缩放范围
+- **多尺度检测**: 0.8x ~ 1.5x 缩放范围（并带按模板历史命中的自适应收敛）
 - **NMS**: 非极大值抑制去除重叠结果（IoU 阈值 0.5）
 - **DetectResult**: 包含 name, category, x, y, w, h, confidence
 
