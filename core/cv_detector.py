@@ -14,7 +14,6 @@ MAX_GIF_TEMPLATE_FRAMES = 16
 # 多尺度自适应搜索配置
 BASE_SCALES = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
 _FULL_RESCAN_EVERY = 200   # 每 N 次检测强制全尺度扫描，捕捉窗口尺寸漂移
-_TOP_K = 3                 # 收敛后每模板每帧只跑历史最优的前 K 档
 _EMA_ALPHA = 0.3           # 命中置信度指数滑动平均系数
 
 
@@ -73,8 +72,11 @@ class CVDetector:
     }
 
 
-    def __init__(self, templates_dir: str = "templates"):
+    def __init__(self, templates_dir: str = "templates",
+                 base_scales: list[float] | None = None):
         self._templates_dir = templates_dir
+        # 多尺度搜索基准集合（可由配置覆盖，用于极端 DPI/缩放微调）
+        self._base_scales = list(base_scales) if base_scales else BASE_SCALES
         self._templates: dict[str, list[dict]] = {}  # category -> [{name, image, mask}]
         self._templates_by_name: dict[str, list[dict]] = {}  # name -> template variants（快速查找）
         self._loaded = False
@@ -157,24 +159,37 @@ class CVDetector:
     # ── 多尺度自适应搜索 ─────────────────────────────────────
 
     def _priority_scales(self, name: str, base: list[float] | None = None) -> list[float]:
-        """返回该模板本帧应搜索的尺度顺序。
+        """返回该模板本帧应搜索的尺度顺序（EMA 排序，始终覆盖完整基准尺度）。
 
-        收敛后只跑历史命中置信度最高的前 _TOP_K 档（按 EMA 排序），
-        并把最优档排在最前以触发 early-exit；每 _FULL_RESCAN_EVERY 次检测
-        强制全尺度扫描，捕捉窗口尺寸变化（用户改窗口/换显示器）。
+        返回列表按历史命中置信度 EMA 降序排列，最可能是真实尺度的档排在最前，
+        配合匹配层的 early-exit（scale_max > 0.95 即停止）可在稳态下只跑 1~3 档，
+        性能与过去相当。关键在于：无论调用方传入的 base 多窄（如 SCALES_FAST 的
+        3 档），这里都会自动补足完整 BASE_SCALES（或配置基准集合），避免收敛后
+        把真实尺度永久排除在外（这正是“一键务农”等按钮在高 DPI/窗口缩放时
+        漏检的根因）。
         """
-        base = base or BASE_SCALES
+        # 全尺度兜底：base（调用方窄集合）+ 配置基准集合 + 硬编码 BASE_SCALES
+        # 三者取并集，确保无论配置多窄都至少覆盖 BASE_SCALES，杜绝尺度集过窄漏检
+        full: list[float] = list(base) if base else []
+        for scale in self._base_scales:
+            if scale not in full:
+                full.append(scale)
+        for scale in BASE_SCALES:
+            if scale not in full:
+                full.append(scale)
+
+        # 周期性全尺度扫描的语义已由上面的并集覆盖，这里保留分支以维持统计落盘时机
         if self._frame % _FULL_RESCAN_EVERY == 0:
-            return list(base)
+            return full
+
         ema = self._scale_ema.get(name)
         if not ema:
-            return list(base)
+            return full
 
-        def _key(s: float):
-            return (ema.get(s, 0.0), self._scale_hits.get(name, {}).get(s, 0))
+        def _key(scale: float) -> tuple:
+            return (ema.get(scale, 0.0), self._scale_hits.get(name, {}).get(scale, 0))
 
-        ranked = sorted(base, key=_key, reverse=True)
-        return ranked[:_TOP_K]
+        return sorted(full, key=_key, reverse=True)
 
     def _record_hit(self, name: str, scale: float, conf: float):
         """记录某模板在某尺度上的命中，更新 EMA 与计数（只在命中时更新）。"""
@@ -213,6 +228,17 @@ class CVDetector:
                 json.dump(data, f, ensure_ascii=False)
         except Exception:
             pass
+
+    def _seed_scale_ema(self):
+        """为已加载模板在尺度 1.0 预置基线 EMA，使首帧即按最优尺度排序、
+        配合匹配层早停跳过全 8 档扫描，加速冷启动（仅补充统计中缺失的模板）。
+        """
+        baseline = 0.8
+        for name in self._templates_by_name:
+            ema = self._scale_ema.setdefault(name, {})
+            if 1.0 not in ema:
+                ema[1.0] = baseline
+                self._scale_hits.setdefault(name, {})[1.0] = 0
 
     def get_template_threshold(self, name: str) -> float:
         """获取模板阈值：单模板 > 类别覆盖 > 内置类别默认 > 全局默认 0.8"""
@@ -333,6 +359,7 @@ class CVDetector:
 
         self._loaded = True
         self._load_scale_stats()
+        self._seed_scale_ema()
         msg = f"已加载 {logical_count} 个模板"
         if count != logical_count:
             msg += f"（{count} 个匹配变体）"
@@ -384,12 +411,11 @@ class CVDetector:
             self._save_scale_stats()
 
         results = []
-        gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
         for category, templates in self._templates.items():
             for tpl in templates:
-                matches = self._match_template(
-                    screenshot, gray_screen, tpl, threshold
+                matches = self._match_template_with_scales(
+                    screenshot, tpl, threshold, self._priority_scales(tpl["name"])
                 )
                 results.extend(matches)
 
@@ -418,12 +444,11 @@ class CVDetector:
             self._save_scale_stats()
 
         results = []
-        gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
         templates = self._templates.get(category, [])
         for tpl in templates:
-            matches = self._match_template(
-                screenshot, gray_screen, tpl, threshold
+            matches = self._match_template_with_scales(
+                screenshot, tpl, threshold, self._priority_scales(tpl["name"])
             )
             results.extend(matches)
 
@@ -449,11 +474,10 @@ class CVDetector:
         if self._frame % _FULL_RESCAN_EVERY == 0:
             self._save_scale_stats()
 
-        gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
         results: list[DetectResult] = []
         for tpl in self._templates_by_name.get(name, []):
-            results.extend(self._match_template(
-                screenshot, gray_screen, tpl, threshold
+            results.extend(self._match_template_with_scales(
+                screenshot, tpl, threshold, self._priority_scales(tpl["name"])
             ))
 
         results = [r for r in results
@@ -529,7 +553,7 @@ class CVDetector:
             screenshot: 截图
             names: 要检测的模板名列表
             thresholds: 单模板阈值覆盖 {template_name: threshold}
-            scales: 自定义尺度集合，默认 [1.0, 0.9, 1.1]
+            scales: 自定义尺度集合，未传入时回退到完整 BASE_SCALES
             roi_map: ROI 区域映射 {template_name: (x1, y1, x2, y2)}，只在指定区域检测
         
         Returns:
@@ -547,9 +571,9 @@ class CVDetector:
         
         # 去重
         name_set = set(names)
-        # 未显式传入 scales 时回退到 0.8~1.5 全尺度集合
-        # （调用方通常已传入自适应尺度顺序，见 _priority_scales）
-        fast_scales = scales or [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+        # 未显式传入 scales 时回退到完整 BASE_SCALES；_priority_scales 会进一步
+        # 把任意传入的窄尺度集合补足为完整 BASE_SCALES，避免漏检
+        fast_scales = scales or BASE_SCALES
 
         results = []
         gray_screen = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
@@ -776,110 +800,6 @@ class CVDetector:
 
         return results
 
-    def _match_template(self, screenshot: np.ndarray,
-                        gray_screen: np.ndarray,
-                        tpl: dict,
-                        threshold: float) -> list[DetectResult]:
-        """对单个模板执行多尺度匹配
-
-        seed: 轮廓形状匹配（matchShapes，基于几何形状，不受颜色影响）
-        land: BGR 三通道彩色匹配
-        其他: 灰度匹配
-        """
-        results = []
-        tpl_img = tpl["image"]
-        tpl_mask = tpl.get("mask")
-        tpl_gray = tpl.get("gray")
-        th, tw = tpl_img.shape[:2]
-        sh, sw = screenshot.shape[:2]
-        category = tpl["category"]
-
-        # === 根据类别选择匹配表示 ===
-        if category == "land":
-            tpl_match = tpl_img
-            screen_match = screenshot
-            use_color = True
-
-        else:
-            # 使用缓存的灰度图
-            if tpl_gray is None:
-                tpl_gray = cv2.cvtColor(tpl_img, cv2.COLOR_BGR2GRAY)
-                tpl["gray"] = tpl_gray
-            tpl_match = tpl_gray
-            screen_match = gray_screen
-            use_color = False
-
-        scales = self._priority_scales(tpl["name"])
-        max_hits = 64 if category == "land" else 8
-
-        for scale in scales:
-            new_w = int(tw * scale)
-            new_h = int(th * scale)
-            if new_w >= sw or new_h >= sh or new_w < 10 or new_h < 10:
-                continue
-
-            resized_tpl = cv2.resize(tpl_match, (new_w, new_h))
-            resized_mask = None
-            if tpl_mask is not None:
-                resized_mask = cv2.resize(tpl_mask, (new_w, new_h),
-                                          interpolation=cv2.INTER_NEAREST)
-
-            if use_color:
-                confidences = []
-                for c in range(3):
-                    screen_ch = screen_match[:, :, c]
-                    tpl_ch = resized_tpl[:, :, c]
-                    if resized_mask is not None:
-                        mr = cv2.matchTemplate(screen_ch, tpl_ch,
-                                               cv2.TM_CCOEFF_NORMED,
-                                               mask=resized_mask)
-                    else:
-                        mr = cv2.matchTemplate(screen_ch, tpl_ch,
-                                               cv2.TM_CCOEFF_NORMED)
-                    confidences.append(mr)
-                match_result = np.mean(confidences, axis=0)
-            else:
-                if resized_mask is not None:
-                    match_result = cv2.matchTemplate(
-                        screen_match, resized_tpl, cv2.TM_CCOEFF_NORMED,
-                        mask=resized_mask)
-                else:
-                    match_result = cv2.matchTemplate(
-                        screen_match, resized_tpl, cv2.TM_CCOEFF_NORMED)
-
-            np.nan_to_num(match_result, copy=False, nan=-1.0,
-                          posinf=-1.0, neginf=-1.0)
-
-            locations = np.where(match_result >= threshold)
-            if locations[0].size > max_hits:
-                scores = match_result[locations]
-                top_idx = np.argpartition(scores, -max_hits)[-max_hits:]
-                pt_ys = locations[0][top_idx]
-                pt_xs = locations[1][top_idx]
-            else:
-                pt_ys = locations[0]
-                pt_xs = locations[1]
-
-            scale_max = 0.0
-            for pt_y, pt_x in zip(pt_ys, pt_xs):
-                confidence = float(match_result[pt_y, pt_x])
-                scale_max = max(scale_max, confidence)
-                results.append(DetectResult(
-                    name=tpl["name"],
-                    category=tpl["category"],
-                    x=pt_x + new_w // 2,
-                    y=pt_y + new_h // 2,
-                    w=new_w,
-                    h=new_h,
-                    confidence=confidence,
-                ))
-
-            if scale_max > 0:
-                self._record_hit(tpl["name"], scale, scale_max)
-            if scale_max > 0.95:
-                break
-
-        return results
 
     @staticmethod
     def _nms(results: list[DetectResult],

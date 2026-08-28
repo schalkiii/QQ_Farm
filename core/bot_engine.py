@@ -31,7 +31,7 @@ from models.farm_state import ActionType
 from models.game_data import get_best_crop_for_level, get_crop_by_name, get_latest_crop_for_level, format_grow_time
 from core.window_manager import WindowManager
 from core.screen_capture import ScreenCapture
-from core.cv_detector import CVDetector, DetectResult
+from core.cv_detector import BASE_SCALES, CVDetector, DetectResult
 from core.action_executor import ActionExecutor
 from core.task_scheduler import TaskScheduler, BotState
 from core.scene_detector import Scene, identify_scene
@@ -147,7 +147,10 @@ class BotEngine(QObject):
         self.screen_capture = ScreenCapture()
 
         # [2] 图像识别层
-        self.cv_detector = CVDetector(templates_dir="templates")
+        self.cv_detector = CVDetector(
+            templates_dir="templates",
+            base_scales=self.config.scale_search,
+        )
 
         # [3] 行为决策层（按优先级）
         self.popup = PopupStrategy(self.cv_detector)       # P-1
@@ -283,7 +286,7 @@ class BotEngine(QObject):
             SCENE_TEMPLATES + LAND_TEMPLATES + self._STRATEGY_EXTRA_TEMPLATES
         ))
         detections = self.cv_detector.detect_targeted(
-            cv_image, all_names, scales=[1.0, 0.9, 1.1]
+            cv_image, all_names, scales=BASE_SCALES
         )
         return cv_image, detections, None
 
@@ -1014,7 +1017,7 @@ class BotEngine(QObject):
 
             # 断网/异地登录检测：检测 ui_next_time 模板
             next_time_dets = self.cv_detector.detect_targeted(
-                cv_img, ["ui_next_time"], scales=[1.0, 0.9, 1.1]
+                cv_img, ["ui_next_time"], scales=BASE_SCALES
             )
             if next_time_dets:
                 logger.warning("窗口监控：检测到断网/异地登录（ui_next_time），触发重连")
@@ -1103,7 +1106,7 @@ class BotEngine(QObject):
             names.extend(extra_names)
 
         detections = self.cv_detector.detect_targeted(
-            cv_image, names, scales=[1.0, 0.9, 1.1]
+            cv_image, names, scales=BASE_SCALES
         )
         detections = [d for d in detections
                       if d.name != "btn_shop_close"
@@ -1490,7 +1493,7 @@ class BotEngine(QObject):
         rect = context.get("rect")
         if not rect:
             return False
-        cv_img, dets = self.popup.quick_detect(rect, ["menu_check"], scales=[1.0, 0.9, 1.1])
+        cv_img, dets = self.popup.quick_detect(rect, ["menu_check"], scales=BASE_SCALES)
         if cv_img is None:
             return False
         menu = self.popup.find_by_name(dets, "menu_check")
@@ -1509,7 +1512,7 @@ class BotEngine(QObject):
         elif scene == Scene.INFO_PAGE:
             # 只检测关闭相关的按钮
             cv_img, dets = self.popup.quick_detect(rect, ["btn_close", "btn_info_close", "btn_rw_close"],
-                                                     scales=[1.0, 0.9, 1.1])
+                                                     scales=BASE_SCALES)
             if cv_img is None:
                 return False
             info_close = self.popup.find_any(dets, ["btn_close", "btn_info_close", "btn_rw_close"])
@@ -1520,7 +1523,7 @@ class BotEngine(QObject):
             return self.popup.handle_popup_direct(rect) is not None
         elif scene == Scene.MALL_PAGE:
             # 只检测商城返回按钮
-            cv_img, dets = self.popup.quick_detect(rect, ["btn_shangcehng_fanhui"], scales=[1.0, 0.9, 1.1])
+            cv_img, dets = self.popup.quick_detect(rect, ["btn_shangcehng_fanhui"], scales=BASE_SCALES)
             if cv_img is None:
                 return False
             mall_back = self.popup.find_by_name(dets, "btn_shangcehng_fanhui")
@@ -2647,7 +2650,7 @@ class BotEngine(QObject):
         if cv_img is None:
             return
         info_templates = ["btn_info_close", "btn_info", "btn_close"]
-        dets = self.cv_detector.detect_targeted(cv_img, names=info_templates, scales=[1.0, 0.9, 1.1])
+        dets = self.cv_detector.detect_targeted(cv_img, names=info_templates, scales=BASE_SCALES)
 
         det_names = [d.name for d in dets]
         info_close = any(d.name == "btn_info_close" for d in dets)
@@ -2972,7 +2975,7 @@ class BotEngine(QObject):
 
         detections = self.cv_detector.detect_targeted(
             cv_img, ['btn_land_right', 'btn_land_left'],
-            scales=[1.0, 0.9, 1.1],
+            scales=BASE_SCALES,
         )
 
         anchor = None

@@ -4,7 +4,7 @@ from loguru import logger
 
 from models.game_data import get_crop_seed_price
 from models.farm_state import ActionType
-from core.cv_detector import CVDetector, DetectResult
+from core.cv_detector import BASE_SCALES, CVDetector, DetectResult
 from core.scene_detector import Scene, identify_scene
 from core.strategies.base import BaseStrategy
 from utils.land_grid import get_lands_from_land_anchor
@@ -1323,7 +1323,7 @@ class PlantStrategy(BaseStrategy):
         """
         anchors = self.cv_detector.detect_targeted(
             cv_img, ['btn_land_right', 'btn_land_right_2', 'btn_land_left'],
-            scales=[1.0, 0.9, 1.1],
+            scales=BASE_SCALES,
         )
         right_anchor, left_anchor = self._select_land_anchor_pair(anchors)
 

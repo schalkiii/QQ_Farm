@@ -2,7 +2,7 @@
 import time
 from models.farm_state import ActionType
 from core.cv_detector import DetectResult
-from core.strategies.base import BaseStrategy, SCALES_FAST
+from core.strategies.base import BaseStrategy
 
 _HARVEST_ICON_NAMES = ("icon_mature", "icon_caiji")
 
@@ -40,8 +40,11 @@ class HarvestStrategy(BaseStrategy):
         if self.stopped:
             return None
 
+        # 检测器（CVDetector._priority_scales）会自动把任意尺度集补足为完整
+        # BASE_SCALES，因此即便 quick_detect 默认用窄尺度 SCALES_FAST，
+        # 按钮在窗口缩放/DPI 偏离时也不会漏检，无需在此显式指定全尺度。
         cv_img, dets = self.quick_detect(
-            rect, ["btn_harvest"] + list(_HARVEST_ICON_NAMES), scales=SCALES_FAST
+            rect, ["btn_harvest"] + list(_HARVEST_ICON_NAMES)
         )
         if cv_img is None:
             return None
@@ -89,7 +92,7 @@ class HarvestStrategy(BaseStrategy):
             return None
         if isinstance(rect_or_dets, tuple):
             cv_img, dets = self.quick_detect(
-                rect_or_dets, list(_HARVEST_ICON_NAMES), scales=SCALES_FAST
+                rect_or_dets, list(_HARVEST_ICON_NAMES)
             )
             if cv_img is None:
                 return None

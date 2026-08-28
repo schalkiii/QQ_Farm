@@ -233,6 +233,9 @@ class AppConfig(BaseModel):
     cross_instance: CrossInstanceConfig = Field(default_factory=CrossInstanceConfig)
     recovery: RecoveryConfig = Field(default_factory=RecoveryConfig)
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
+    scale_search: list[float] = Field(
+        default_factory=lambda: [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+    )  # 多尺度搜索档位（DPI/窗口缩放容差），可下放到实例配置微调
 
     _config_path: str = ""
 

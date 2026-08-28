@@ -9,6 +9,9 @@ import cv2
 import numpy as np
 from loguru import logger
 
+from core.cv_detector import BASE_SCALES
+from utils.roi_scale import scale_roi
+
 
 WAREHOUSE_SEED_GRID_COLS: int = 5
 WAREHOUSE_SEED_GRID_ROWS: int = 3
@@ -105,16 +108,9 @@ def _scale_bbox(
     width: int,
     height: int,
 ) -> tuple[int, int, int, int]:
+    """按基准尺寸比例换算 ROI（委托给通用工具 scale_roi）。"""
     base_w, base_h = WAREHOUSE_SEED_BASE_SIZE
-    sx = float(width) / float(base_w)
-    sy = float(height) / float(base_h)
-    x1, y1, x2, y2 = bbox
-    return (
-        int(round(x1 * sx)),
-        int(round(y1 * sy)),
-        int(round(x2 * sx)),
-        int(round(y2 * sy)),
-    )
+    return scale_roi(bbox, base_w, base_h, width, height)
 
 
 def _candidate_rois(width: int, height: int) -> list[tuple[int, int, int, int]]:
@@ -358,7 +354,7 @@ def detect_locked_warehouse_slot_indexes(
         return set()
 
     thresholds = {name: max(0.78, float(cv_detector.get_template_threshold(name))) for name in names}
-    hits = cv_detector.detect_targeted(screenshot, names, thresholds=thresholds, scales=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5])
+    hits = cv_detector.detect_targeted(screenshot, names, thresholds=thresholds, scales=BASE_SCALES)
     if not hits:
         return set()
 
@@ -409,7 +405,7 @@ def scan_warehouse_seed_page(
         screenshot,
         [template_name],
         thresholds={template_name: threshold},
-        scales=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
+        scales=BASE_SCALES,
         roi_map=roi_map,
     )
     for hit in hits:

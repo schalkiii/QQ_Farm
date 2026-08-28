@@ -4,7 +4,7 @@ from loguru import logger
 
 from models.farm_state import ActionType
 from core.cv_detector import DetectResult
-from core.strategies.base import BaseStrategy, SCALES_FAST
+from core.strategies.base import BaseStrategy
 
 _MAINTAIN_BTN = "btn_一键务农"
 _MAINTAIN_FEATURE = "auto_maintain"
@@ -57,7 +57,10 @@ class MaintainStrategy(BaseStrategy):
         if not features.get(_MAINTAIN_FEATURE, True):
             return None
 
-        cv_img, dets = self.quick_detect(rect, [_MAINTAIN_BTN], scales=SCALES_FAST)
+        # 检测器（CVDetector._priority_scales）会自动把任意尺度集补足为完整
+        # BASE_SCALES，因此即便 quick_detect 默认用窄尺度 SCALES_FAST，
+        # 按钮在窗口缩放/DPI 偏离时也不会漏检，无需在此显式指定全尺度。
+        cv_img, dets = self.quick_detect(rect, [_MAINTAIN_BTN])
         if cv_img is None:
             return None
 
@@ -71,7 +74,7 @@ class MaintainStrategy(BaseStrategy):
         rounds_stable = 0
 
         while not self.stopped:
-            cv_img, dets = self.quick_detect(rect, [_MAINTAIN_BTN], scales=SCALES_FAST)
+            cv_img, dets = self.quick_detect(rect, [_MAINTAIN_BTN])
             if cv_img is None:
                 time.sleep(0.15)
                 continue

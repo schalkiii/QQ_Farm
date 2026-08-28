@@ -6,7 +6,8 @@ from models.farm_state import Action, ActionType
 from core.cv_detector import CVDetector, DetectResult
 
 
-# 默认精简尺度集合（只检测 3 个尺度，比全量检测 5 个尺度更快）
+# 偏好尺度子集（仅 3 档）。注意：CVDetector._priority_scales 会自动把任意传入的
+# 尺度集合补足为完整 BASE_SCALES，因此即便只用本子集也不会漏检，仅影响首帧命中速度。
 SCALES_FAST = [1.0, 0.9, 1.1]
 
 
@@ -59,7 +60,7 @@ class BaseStrategy:
             rect: 窗口区域
             names: 要检测的模板名列表
             thresholds: 单模板阈值覆盖
-            scales: 自定义尺度集合，默认 [1.0, 0.9, 1.1]
+            scales: 自定义尺度集合；未传入时回退到 SCALES_FAST，检测器会自动补足完整 BASE_SCALES
             roi_map: ROI 区域映射 {template_name: (x1, y1, x2, y2)}
         
         Returns:

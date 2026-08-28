@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## [2.0.26] 多尺度匹配架构优化 + 隐藏 NMS bug 修复 + 离线回归测试
+
+### 改动
+- **架构优化①（可配置基准尺度）**：`CVDetector.__init__` 新增 `base_scales` 参数，`bot_engine` 通过 `config.scale_search` 注入；`_priority_scales` 始终把 `base`、配置基准集合与硬编码 `BASE_SCALES` 三者取并集，确保搜索范围永不窄于 `BASE_SCALES`（极端 DPI/缩放仍可微调）。
+- **架构优化②（EMA 冷启动预热）**：新增 `_seed_scale_ema()`，在 `load_templates()` 后为每个模板在尺度 `1.0` 预置基线 EMA；首帧即按最优尺度排序，配合匹配层早停跳过全 8 档扫描，加速收敛。
+- **架构优化③（收敛重复匹配逻辑）**：删除与 `_match_template_with_scales` 重复的私有方法 `_match_template`；`detect_all`/`detect_category`/`detect_single_template` 三个公开入口统一收敛到 `_match_template_with_scales`，并移除调用方不再需要的 `gray_screen` 局部变量（`detect_quick`/`detect_targeted` 的 `gray_screen` 仍用于各自逻辑，保留）。
+- **隐藏 bug 修复**：`_nms` 定义为实例方法却缺 `@staticmethod`，被 `self._nms(results, iou_threshold=0.5)` 调用时 `self` 被当作首个位置参数注入，导致 `iou_threshold` 同时收到位置与关键字值而抛 `TypeError`；`detect_all`/`detect_single_template` 一旦有匹配即崩溃。已补 `@staticmethod`。
+- **测试**：新增 `tests/test_cv_detector_scales.py`（无需真实游戏窗口），覆盖尺度集合不截断、EMA 命中排序、`_seed_scale_ema` 幂等、`base_scales` 并集、三个检测入口脱离 `gray_screen` 可运行；已在 `.gitignore` 加例外纳入版本控制。
+
+### 验证
+- 全仓 `compileall` 通过；`core/cv_detector.py` 全文 grep 确认无 `_match_template(`（旧 4 参）残留、无重复 `_match_template_with_scales_roi`；lint 清零。
+- `python tests/test_cv_detector_scales.py` 全部 PASS。
+- 待真实窗口实测：一键务农/收获/浇水/仓库复查在高 DPI 或多实例窗口下稳定命中，CPU 无回归。
+
+## [2.0.25] 多尺度检测漏检根因修复（一键务农/收获/浇水等按钮）
+
+### 改动
+- **根因**：`cv_detector._priority_scales` 收敛后只返回 `base` 的前 `_TOP_K=3` 档，而 `base` 常被调用方传成窄集合 `SCALES_FAST=[1.0,0.9,1.1]`（`quick_detect` 默认、bot_engine/land_scan/plant 等内联列表）。按钮一旦落在 0.9~1.1 之外（高 DPI / 窗口缩放），首帧搜不到 → EMA 永远不记录该尺度 → **永久漏检**。这正是"一键务农/收获/浇水"按钮点不到的根因。
+- **修复**：`_priority_scales` 不再截断到 `_TOP_K`，改为始终把 `base` 与完整 `BASE_SCALES=[0.8..1.5]` 取并集后按 EMA 降序返回；匹配层 `scale_max>0.95` 早停保证稳态下仍只跑 1~3 档、性能不变。一处修复覆盖 harvest/maintain/popup/friend/targeted/land_scan/bot_engine/plant 全部调用点。
+- **死代码**：删除失效的 `_TOP_K` 常量。
+- **一致性**：`detect_targeted`/`warehouse_seed_scan` 中重复的完整尺度字面量统一引用 `BASE_SCALES`；bot_engine/land_scan/plant/targeted_prank 的内联窄尺度列表统一为 `BASE_SCALES`/`SCALES_FAST`；`SCALES_FAST` 文档补充"检测器会自动补足完整尺度"；清理 harvest/maintain 未使用的 `SCALES_FAST` 导入及与代码行为不符的误导注释。
+- 说明：harvest/maintain 的 `quick_detect` 调用此前未显式传 `scales`，注释却声称已回退全尺度，实际仍走窄集合；根因修复后无需逐点补传。
+
+### 验证
+- 改动文件 `python -m py_compile` 通过；全文 grep 确认无 `_TOP_K` 及内联窄尺度残留；lint 清零。
+- 待真实窗口实测：一键务农/收获/浇水按钮在高 DPI 或多实例窗口下应稳定命中，CPU 占用无回归。
+
 ## [2.0.24] 代码质量清理（等价变换，零行为变更）
 
 参考 `code-quality-sw.md` / `architecture-optimization-sw.md` 两个 skill 对本仓做优化。本版本为**纯等价变换**：删除死代码/重复逻辑、修正误导性注释与可变默认参数、收敛重复常量；功能行为不变。架构层优化建议见 [ARCH_OPTIMIZATION.md](ARCH_OPTIMIZATION.md)（按收益/风险排序，仅建议未直接改代码）。

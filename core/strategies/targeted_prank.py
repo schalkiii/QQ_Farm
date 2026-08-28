@@ -539,7 +539,7 @@ class TargetedPrankStrategy(BaseStrategy):
 
             anchors = self.cv_detector.detect_targeted(
                 cv_img, ['btn_land_right', 'btn_land_left'],
-                scales=[1.0, 0.9, 1.1],
+                scales=SCALES_FAST,
             )
             anchor_right, anchor_left = self._select_land_anchor_pair(anchors)
 

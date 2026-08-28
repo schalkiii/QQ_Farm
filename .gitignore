@@ -29,6 +29,8 @@ screenshots/
 # 测试与调试脚本
 test_*.py
 test_*.png
+# 例外：可离线运行的尺度逻辑回归测试需纳入版本控制
+!tests/test_cv_detector_scales.py
 
 # 临时截图
 Snipaste_*.png

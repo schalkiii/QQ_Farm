@@ -8,7 +8,7 @@ import time
 
 from loguru import logger
 
-from core.cv_detector import DetectResult
+from core.cv_detector import BASE_SCALES, DetectResult
 from utils.land_grid import LAND_ANCHOR_SPAN_BASELINE, LandCell, get_lands_from_land_anchor
 from utils.ocr_utils import OCRItem, OCRTool
 
@@ -47,6 +47,12 @@ LAND_SCAN_UPGRADE_EMPTY_REGION_OFFSET = (-100, -50, 0, 0)
 # 已播种弹窗升级图标 ROI：相对 btn_crop_maturity_time_suffix 中心
 LAND_SCAN_UPGRADE_PLOTTED_REGION_OFFSET = (0, -50, 130, 50)
 LAND_SCAN_UPGRADE_ICON_THRESHOLD = 0.65
+# 地块巡查专用阈值（集中管理，避免散落硬编码）
+LAND_SCAN_CROP_REMOVAL_THRESHOLDS: dict[str, float] = {
+    'btn_crop_removal': 0.65,
+    'btn_crop_maturity_time_suffix': 0.65,
+    'btn_land_pop_empty': 0.65,
+}
 
 # 成熟时间文本正则
 LAND_SCAN_MATURITY_TIME_PATTERN = re.compile(r'(\d{2})[：:](\d{2})[：:](\d{2})')
@@ -218,7 +224,7 @@ class LandScanTask:
         if cv_img is None:
             return False
         dets = bot_engine.cv_detector.detect_targeted(
-            cv_img, ['menu_check'], scales=[1.0, 0.9, 1.1],
+            cv_img, ['menu_check'], scales=BASE_SCALES,
         )
         menu = next((d for d in dets if d.name == 'menu_check'), None)
         if not menu:
@@ -335,7 +341,7 @@ class LandScanTask:
         if cv_img is None:
             return cells
         detections = bot_engine.cv_detector.detect_targeted(
-            cv_img, ['btn_expand_brand'], scales=[1.0, 0.9, 1.1],
+            cv_img, ['btn_expand_brand'], scales=BASE_SCALES,
         )
 
         brand_det = None
@@ -496,7 +502,7 @@ class LandScanTask:
             if anchor_name == 'btn_land_right':
                 anchor_names.append('btn_land_right_2')
             detections = bot_engine.cv_detector.detect_targeted(
-                cv_img, anchor_names, scales=[1.0, 0.9, 1.1],
+                cv_img, anchor_names, scales=BASE_SCALES,
             )
 
             current_pos: tuple[int, int] | None = None
@@ -570,12 +576,8 @@ class LandScanTask:
             if cv_img is None:
                 continue
             detections = bot_engine.cv_detector.detect_targeted(
-                cv_img, _POPUP_TEMPLATES, scales=[1.0, 0.9, 1.1],
-                thresholds={
-                    'btn_crop_removal': 0.65,
-                    'btn_crop_maturity_time_suffix': 0.65,
-                    'btn_land_pop_empty': 0.65,
-                },
+                cv_img, _POPUP_TEMPLATES, scales=BASE_SCALES,
+                thresholds=LAND_SCAN_CROP_REMOVAL_THRESHOLDS,
             )
 
             # 检查空地弹窗
@@ -763,7 +765,7 @@ class LandScanTask:
             cv_img,
             ['icon_land_upgrade'],
             thresholds={'icon_land_upgrade': LAND_SCAN_UPGRADE_ICON_THRESHOLD},
-            scales=[1.0, 0.9, 1.1],
+            scales=BASE_SCALES,
             roi_map={'icon_land_upgrade': roi},
         )
         if detections:
@@ -989,7 +991,7 @@ def _detect_land_anchors(bot_engine, cv_img) -> tuple[tuple[int, int] | None, tu
     detections = bot_engine.cv_detector.detect_targeted(
         cv_img,
         ['btn_land_right', 'btn_land_right_2', 'btn_land_left', 'btn_expand_brand'],
-        scales=[1.0, 0.9, 1.1],
+        scales=BASE_SCALES,
     )
 
     right_anchor = None
