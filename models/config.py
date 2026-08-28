@@ -28,6 +28,10 @@ class PlantMode(str, Enum):
     LATEST_LEVEL = "latest_level"    # 当前等级下可种植的最高等级作物
 
 
+class SellConfig(BaseModel):
+    """出售配置 — 仅支持批量全部出售"""
+
+
 class FriendConfig(BaseModel):
     enable_steal: bool = True       # 是否偷菜
     enable_maintain: bool = True    # 帮好友一键务农

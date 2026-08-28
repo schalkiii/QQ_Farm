@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## [2.0.27] 修复合并回归：SellConfig 类定义丢失导致 EXE 启动崩溃
+
+### 改动
+- **根因**：合并提交 `1e3ffe3` 解决冲突时误删了 `models/config.py` 中的 `class SellConfig`，但保留了 `AppConfig.sell: SellConfig` 字段引用。两个父分支（`1e3ffe3^1`/`^2`）与 upstream 均完整保留该类，仅合并结果丢失。表现为打包后 `python main.py` 在模块导入期即抛 `NameError: name 'SellConfig' is not defined`，EXE 完全无法启动。
+- **修复**：在 `FriendConfig` 之前补回 `SellConfig`（仅文档字符串、无字段，与父分支/upstream 一致）。
+- **排查**：用 AST 对比合并提交与两个父分支的全部 `.py` 顶层符号（class/函数/模块级赋值），确认 `SellConfig` 是**唯一**丢失的符号，无其它合并回归残留；诊断脚本用后即删。
+
+### 验证
+- `python -c "import main"` 通过（此前在导入期崩溃）；`AppConfig()` 实例化正常。
+- 待重新打包：EXE 应能正常启动到 GUI。
+
 ## [2.0.26] 多尺度匹配架构优化 + 隐藏 NMS bug 修复 + 离线回归测试
 
 ### 改动
