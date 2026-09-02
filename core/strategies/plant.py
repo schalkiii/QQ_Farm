@@ -7,7 +7,14 @@ from models.farm_state import ActionType
 from core.cv_detector import BASE_SCALES, CVDetector, DetectResult
 from core.scene_detector import Scene, identify_scene
 from core.strategies.base import BaseStrategy
-from utils.land_grid import get_lands_from_land_anchor, scaled_col_step, scaled_row_step, scaled_baseline_anchor
+from utils.land_grid import (
+    LAND_ANCHOR_SPAN_BASELINE,
+    anchors_pair_consistent,
+    get_lands_from_land_anchor,
+    scaled_baseline_anchor,
+    scaled_col_step,
+    scaled_row_step,
+)
 from utils.warehouse_seed_scan import WarehouseSeedScanResult, scan_warehouse_seed_page
 
 # 尝试导入 OCR 模块（可选依赖）
@@ -1420,7 +1427,7 @@ class PlantStrategy(BaseStrategy):
             cv_img, ['btn_land_right', 'btn_land_right_2', 'btn_land_left'],
             scales=BASE_SCALES,
         )
-        right_anchor, left_anchor = self._select_land_anchor_pair(anchors)
+        right_anchor, left_anchor = self._select_land_anchor_pair(anchors, cv_img)
 
         if not right_anchor and not left_anchor:
             logger.warning("施肥流程：锚点检测失败，未找到 btn_land_right / btn_land_left")
@@ -1453,12 +1460,16 @@ class PlantStrategy(BaseStrategy):
     def _select_land_anchor_pair(
         self,
         anchors: list[DetectResult],
+        cv_img,
     ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        """从多个锚点候选中选择最符合土地网格跨度的一对。
+        """从多个锚点候选中选择最符合土地网格跨度的一对(span 滚动无关的真假判别)。
 
-        真实左右土地锚点的相对跨度接近 baseline: left - right ≈ (-439, 43)。
-        画面里偶尔会把土地纹理误识别成 btn_land_left；旧逻辑直接取最后
-        一个候选，会把 24 格坐标推偏，表现为逐块点击但找不到肥料按钮。
+        真实左右土地锚点 span ≈ 基线 LAND_ANCHOR_SPAN_BASELINE 缩放到当前帧 → 用
+        缩放基线做 score 偏好挑最近一对,再用 anchors_pair_consistent 做**硬校验**:
+        span 偏离基线超过 20% 直接拒(疑似误识别对,例如把仓库/好友列表 UI 当成锚点)。
+        替代了原硬编码 `(-439, 43)` —— 那数不是任何标准缩放(760x1490 应是 -280,110,
+        581x1054 应是 -214,78),导致分数偏好错的对、且没有任何 span 硬校验,
+        现象就是"网格算到好友"。
         """
         rights = [
             det for det in anchors
@@ -1467,8 +1478,11 @@ class PlantStrategy(BaseStrategy):
         lefts = [det for det in anchors if det.name == "btn_land_left"]
 
         if rights and lefts:
-            expected_dx = -439
-            expected_dy = 43
+            h, w = int(cv_img.shape[0]), int(cv_img.shape[1])
+            # 当前帧的期望 span(基线 × 缩放)
+            expected_dx, expected_dy = scaled_baseline_anchor(
+                w, h, LAND_ANCHOR_SPAN_BASELINE,
+            )
             best_pair = None
             best_score = float("inf")
             for right in rights:
@@ -1485,12 +1499,21 @@ class PlantStrategy(BaseStrategy):
                         best_pair = (right, left, dx, dy)
             if best_pair:
                 right, left, dx, dy = best_pair
+                # 硬校验:span 必须接近基线(滚动无关的真假判别)
+                rxy = (int(right.x), int(right.y))
+                lxy = (int(left.x), int(left.y))
+                if not anchors_pair_consistent(rxy, lxy, w, h):
+                    logger.warning(
+                        f"施肥流程: 锚点 span 不一致(疑似误识别),放弃 | "
+                        f"right={rxy} left={lxy} span=({dx},{dy}) "
+                        f"expect=({expected_dx:.0f},{expected_dy:.0f})"
+                    )
+                    return None, None
                 logger.info(
-                    "施肥流程：选择锚点对 "
-                    f"right=({int(right.x)},{int(right.y)}) "
-                    f"left=({int(left.x)},{int(left.y)}) span=({dx},{dy})"
+                    "施肥流程: 选择锚点对 "
+                    f"right={rxy} left={lxy} span=({dx},{dy})"
                 )
-                return (int(right.x), int(right.y)), (int(left.x), int(left.y))
+                return rxy, lxy
 
         if rights:
             best_right = max(rights, key=lambda det: float(det.confidence))
@@ -1546,6 +1569,16 @@ class PlantStrategy(BaseStrategy):
             logger.info(f"施肥流程：capture 返回 cv_img={cv_img is not None}")
             if cv_img is None:
                 logger.warning("施肥流程：截屏失败")
+                return all_actions
+
+            # 场景安全:仅在自家农场施肥。好友农场/弹窗/侧边菜单下点击会点到别处
+            # (历史上 17:52 施肥点击地块 1/14 跳到好友列表就是因为没场景校验)。
+            scene = identify_scene(dets, self.cv_detector, cv_img)
+            if scene != Scene.FARM_OVERVIEW:
+                logger.warning(
+                    f"施肥流程: 当前场景不是自家农场(scene={scene.value}),"
+                    f"拒绝施肥(可能上一任务留在好友/弹窗/菜单页)"
+                )
                 return all_actions
 
             land_dets = self._detect_lands_by_anchor(cv_img)

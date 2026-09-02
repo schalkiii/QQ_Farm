@@ -27,6 +27,63 @@ LAND_ANCHOR_SPAN_BASELINE = (
 LAND_COL_STEP_BASELINE = (-43.0, 16.0)
 LAND_ROW_STEP_BASELINE = (54.0, -50.0)
 
+# 基线帧尺寸(用于把锚点/跨度缩放到当前帧)
+LAND_BASELINE_FRAME_WIDTH = 581
+LAND_BASELINE_FRAME_HEIGHT = 1054
+
+
+def scaled_baseline_anchor(width: int, height: int, baseline: tuple[float, float]) -> tuple[float, float]:
+    """按当前帧尺寸缩放基线锚点坐标。
+
+    Args:
+        width: 当前帧宽度(像素)
+        height: 当前帧高度(像素)
+        baseline: 基线帧(581x1054)中的 (x, y)
+
+    Returns:
+        缩放到当前帧的 (x, y)
+    """
+    sx = width / LAND_BASELINE_FRAME_WIDTH
+    sy = height / LAND_BASELINE_FRAME_HEIGHT
+    return baseline[0] * sx, baseline[1] * sy
+
+
+def anchors_pair_consistent(
+    right_anchor: tuple[int, int] | None,
+    left_anchor: tuple[int, int] | None,
+    frame_width: int,
+    frame_height: int,
+    tol_ratio: float = 0.2,
+) -> bool:
+    """检查 detected 左右锚点是否构成有效锚点对(span ≈ 基线 span 的滚动无关判别)。
+
+    核心:左右锚点是农田中两个**固定**的按钮,span 在视图滚动时**不变**(整体平移)。
+    真锚点对 → span 恒定;误识别对(把仓库/商店/UI 当成锚点)→ span 几乎必然偏离。
+    替代原先"detected 必须接近基线"的判定 — 后者在视图滚动后把真锚点也判为不可信。
+
+    Args:
+        right_anchor: BTN_LAND_RIGHT 检测位置 (x, y) 或 None
+        left_anchor: BTN_LAND_LEFT 检测位置 (x, y) 或 None
+        frame_width: 当前帧宽度
+        frame_height: 当前帧高度
+        tol_ratio: span 长度相对容差(检测抖动 ~3-7px + 透视,0.2 ≈ 基线 228px 上 46px)
+
+    Returns:
+        True = 两点构成合理锚点对(无论是否在默认位置);缺一边返回 True(交由其他逻辑)
+    """
+    if right_anchor is None or left_anchor is None:
+        return True
+    expected_dx, expected_dy = scaled_baseline_anchor(
+        frame_width, frame_height, LAND_ANCHOR_SPAN_BASELINE,
+    )
+    expected_mag = math.hypot(expected_dx, expected_dy)
+    if expected_mag <= 1e-6:
+        return False
+    actual_dx = left_anchor[0] - right_anchor[0]
+    actual_dy = left_anchor[1] - right_anchor[1]
+    actual_mag = math.hypot(actual_dx, actual_dy)
+    return abs(actual_mag - expected_mag) / expected_mag <= tol_ratio
+
 
 @dataclass(frozen=True)
 class LandCell:

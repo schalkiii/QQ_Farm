@@ -541,7 +541,7 @@ class TargetedPrankStrategy(BaseStrategy):
                 cv_img, ['btn_land_right', 'btn_land_left'],
                 scales=SCALES_FAST,
             )
-            anchor_right, anchor_left = self._select_land_anchor_pair(anchors)
+            anchor_right, anchor_left = self._select_land_anchor_pair(anchors, cv_img)
 
             if anchor_right or anchor_left:
                 break
@@ -576,18 +576,28 @@ class TargetedPrankStrategy(BaseStrategy):
     def _select_land_anchor_pair(
         self,
         anchors: list[DetectResult],
+        cv_img,
     ) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        """从多个锚点候选中选择最符合土地网格跨度的一对。
+        """从多个锚点候选中选择最符合土地网格跨度的一对(span 滚动无关的真假判别)。
 
-        真实左右土地锚点的相对跨度接近 baseline: left - right ≈ (-439, 43)。
-        好友农场画面里偶尔会把土地纹理误识别成 btn_land_left；旧逻辑直接取
-        最后一个候选，会把整套 24 格坐标推偏，表现就是点开土地后又空点返回。
+        与 plant.py fertilize 同实现:用基线缩放后的期望 span 做 score 偏好,
+        再用 anchors_pair_consistent 做**硬校验**(span 偏离基线 >20% 直接拒)。
+        替代了原硬编码 `(-439, 43)` —— 那数不是任何标准缩放(760x1490 应是 -280,110,
+        581x1054 应是 -214,78),导致分数偏好错的对、且没有任何 span 硬校验。
         """
+        from utils.land_grid import (
+            LAND_ANCHOR_SPAN_BASELINE,
+            anchors_pair_consistent,
+            scaled_baseline_anchor,
+        )
+
         rights = [det for det in anchors if det.name == 'btn_land_right']
         lefts = [det for det in anchors if det.name == 'btn_land_left']
         if rights and lefts:
-            expected_dx = -439
-            expected_dy = 43
+            h, w = int(cv_img.shape[0]), int(cv_img.shape[1])
+            expected_dx, expected_dy = scaled_baseline_anchor(
+                w, h, LAND_ANCHOR_SPAN_BASELINE,
+            )
             best_pair = None
             best_score = float("inf")
             for right in rights:
@@ -605,12 +615,20 @@ class TargetedPrankStrategy(BaseStrategy):
                         best_pair = (right, left, dx, dy)
             if best_pair:
                 right, left, dx, dy = best_pair
+                rxy = (int(right.x), int(right.y))
+                lxy = (int(left.x), int(left.y))
+                if not anchors_pair_consistent(rxy, lxy, w, h):
+                    logger.warning(
+                        f"定点捣乱: 锚点 span 不一致(疑似误识别),放弃 | "
+                        f"right={rxy} left={lxy} span=({dx},{dy}) "
+                        f"expect=({expected_dx:.0f},{expected_dy:.0f})"
+                    )
+                    return None, None
                 logger.info(
                     "定点捣乱: 选择锚点对 "
-                    f"right=({int(right.x)},{int(right.y)}) "
-                    f"left=({int(left.x)},{int(left.y)}) span=({dx},{dy})"
+                    f"right={rxy} left={lxy} span=({dx},{dy})"
                 )
-                return (int(right.x), int(right.y)), (int(left.x), int(left.y))
+                return rxy, lxy
 
         if rights:
             best_right = max(rights, key=lambda det: float(det.confidence))
