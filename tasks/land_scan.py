@@ -6,6 +6,7 @@ import os
 import re
 import time
 from datetime import datetime
+from typing import Any
 
 import cv2
 
@@ -232,7 +233,7 @@ class LandScanTask:
         return False
 
     @staticmethod
-    def _close_side_menu(bot_engine, rect: tuple) -> bool:
+    def _close_side_menu(bot_engine, rect: tuple[int, int, int, int]) -> bool:
         """若侧边菜单打开则点击汉堡收起，恢复农场主界面。"""
         cv_img = bot_engine._capture_only(rect)
         if cv_img is None:
@@ -250,7 +251,7 @@ class LandScanTask:
         return True
 
     @staticmethod
-    def _go_to_main(bot_engine, rect: tuple) -> None:
+    def _go_to_main(bot_engine, rect: tuple[int, int, int, int]) -> None:
         """关闭地块弹窗：先收起可能打开的侧边菜单，再点固定坐标，不做检测循环。"""
         LandScanTask._close_side_menu(bot_engine, rect)
         abs_x, abs_y = bot_engine.action_executor.relative_to_absolute(
@@ -275,7 +276,7 @@ class LandScanTask:
         bot_engine.action_executor.drag(ax1, ay1, dx, dy, duration=0.3, steps=10)
 
     @staticmethod
-    def _reset_view_to_default(bot_engine, rect: tuple, max_swipes: int = 5) -> None:
+    def _reset_view_to_default(bot_engine, rect: tuple[int, int, int, int], max_swipes: int = 5) -> None:
         """把视图重置到默认（农田在画布中央）。
 
         治本：左滑 / 手动滑动后农田画布位置平移，基线 anchor 失效 → 网格
@@ -316,7 +317,7 @@ class LandScanTask:
     # ================================================================
 
     @staticmethod
-    def _measure_anchor_span(bot_engine, rect: tuple) -> tuple[int, int] | None:
+    def _measure_anchor_span(bot_engine, rect: tuple[int, int, int, int]) -> tuple[int, int] | None:
         """在当前窗口实测左右锚点间距，避免套用其他窗口尺寸的固定基线。"""
         cv_img = bot_engine._capture_only(rect)
         if cv_img is None:
@@ -337,7 +338,7 @@ class LandScanTask:
     @staticmethod
     def _collect_land_cells(
         bot_engine,
-        rect: tuple,
+        rect: tuple[int, int, int, int],
         *,
         anchor_span: tuple[int, int] | None = None,
         prefer_anchor: str = 'right',
@@ -442,7 +443,7 @@ class LandScanTask:
 
     @staticmethod
     def _exclude_expand_brand_cells(
-        bot_engine, rect: tuple, cells: list[LandCell],
+        bot_engine, rect: tuple[int, int, int, int], cells: list[LandCell],
     ) -> list[LandCell]:
         """检测扩建标志牌，排除不可统计的地块。"""
         cv_img = bot_engine._capture_only(rect)
@@ -544,7 +545,7 @@ class LandScanTask:
     def _scan_by_physical_columns(
         self,
         bot_engine,
-        rect: tuple,
+        rect: tuple[int, int, int, int],
         cells: list[LandCell],
         *,
         from_side: str,
@@ -640,12 +641,12 @@ class LandScanTask:
             return list(reversed(rtl_cols))[:max(0, column_count)]
         return rtl_cols[:max(0, column_count)]
 
-    def _run_pre_scan_maintain(self, bot_engine, rect: tuple) -> None:
+    def _run_pre_scan_maintain(self, bot_engine, rect: tuple[int, int, int, int]) -> None:
         """地块巡查保持只读，不隐式触发收获或一键务农。"""
         _ = bot_engine, rect
 
     def _wait_anchor_stable(
-        self, bot_engine, rect: tuple, *, anchor_name: str,
+        self, bot_engine, rect: tuple[int, int, int, int], *, anchor_name: str,
     ) -> bool:
         """滑动后等待锚点位置稳定，同坐标保持指定秒数后继续。
 
@@ -729,8 +730,8 @@ class LandScanTask:
     # ================================================================
 
     def _wait_for_popup(
-        self, bot_engine, rect: tuple,
-    ) -> tuple | None:
+        self, bot_engine, rect: tuple[int, int, int, int],
+    ) -> tuple[Any, ...] | None:
         """等待地块弹窗出现，返回 (cv_img, detections, found_planted, empty_det) 或 None。"""
         # 弹窗等待只需检测这 3 个模板
         _POPUP_TEMPLATES = ['btn_crop_removal', 'btn_crop_maturity_time_suffix',
@@ -773,7 +774,7 @@ class LandScanTask:
     # ================================================================
 
     def _click_and_ocr_cell(
-        self, bot_engine, rect: tuple, cell: LandCell,
+        self, bot_engine, rect: tuple[int, int, int, int], cell: LandCell,
         *, from_side: str = 'right',
     ) -> tuple[bool, bool]:
         """点击单个地块并采集信息。
