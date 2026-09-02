@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import time
@@ -19,7 +20,6 @@ from utils.land_grid import (
     LAND_RIGHT_ANCHOR_BASELINE,
     LandCell,
     get_lands_from_land_anchor,
-    scaled_baseline_anchor,
 )
 from utils.ocr_utils import OCRItem, OCRTool
 
@@ -158,10 +158,8 @@ class LandScanTask:
 
         # 确保回到主界面
         self._go_to_main(bot_engine, rect)
-        # ── 关键：先把视图重置到默认（多次右滑让农田回到画布中央）──
-        # 治本：否则滑动后农田位置平移，基线 anchor 失效，回退到基线会把
-        # 网格算到荒地上。手动滑动后 bot 再扫也走这个重置。
-        self._reset_view_to_default(bot_engine, rect)
+        # 视图滚动由 _collect_land_cells 的 span 一致性校验处理(滚动无关的真假判别),
+        # 不再做复位滑动(复位在已到地图边缘时会空推 + 误早停,见 16:01~16:08 日志)。
         anchor_span = self._measure_anchor_span(bot_engine, rect)
 
         scanned_count = 0
@@ -275,42 +273,11 @@ class LandScanTask:
         dx, dy = ax2 - ax1, ay2 - ay1
         bot_engine.action_executor.drag(ax1, ay1, dx, dy, duration=0.3, steps=10)
 
-    @staticmethod
-    def _reset_view_to_default(bot_engine, rect: tuple[int, int, int, int], max_swipes: int = 5) -> None:
-        """把视图重置到默认（农田在画布中央）。
-
-        治本：左滑 / 手动滑动后农田画布位置平移，基线 anchor 失效 → 网格
-        算到荒地。多次右滑让农田回到基线假设的默认位置，再开始扫描。
-        早停：检测到右锚点稳定在基线缩放位置附近就不滑了，避免无谓滑动。
-        """
-        # 阈值：距基线右锚点 < 60px（基线帧 581x1054 的合理容差）算"已回到默认"
-        cv_img = bot_engine._capture_only(rect)
-        if cv_img is None:
-            return
-        h, w = int(cv_img.shape[0]), int(cv_img.shape[1])
-        base_r = scaled_baseline_anchor(w, h, LAND_RIGHT_ANCHOR_BASELINE)
-        for i in range(max_swipes):
-            if LandScanTask._stopped(bot_engine):
-                return
-            cv_img = bot_engine._capture_only(rect)
-            if cv_img is None:
-                return
-            right_anchor, _ = _detect_land_anchors(bot_engine, cv_img)
-            if right_anchor is not None:
-                dx = right_anchor[0] - base_r[0]
-                dy = right_anchor[1] - base_r[1]
-                if (dx * dx + dy * dy) ** 0.5 < 60:
-                    logger.info(
-                        f"地块巡查: 视图已回到默认 | 右锚点={right_anchor} 距基线 {((dx*dx+dy*dy)**0.5):.0f}px"
-                    )
-                    return
-            # 右滑：从 (200,190) 滑到 (350,190) = 向右 = 内容向左滚
-            LandScanTask._swipe(bot_engine, LAND_SCAN_SWIPE_H_P2, LAND_SCAN_SWIPE_H_P1)
-            time.sleep(0.4)  # 等待滑动动画稳定
-        logger.warning(
-            f"地块巡查: 重置视图达最大次数 {max_swipes} 仍偏离基线，"
-            f"右锚点应在 {base_r} 附近"
-        )
+    # 注:_reset_view_to_default 已删除(2026-09-02 16:00 改版)。
+    # 一律右滑在视图已到地图最左边时会空推 + 误早停,导致扫描全失败
+    # (见 16:01~16:08 日志:detected_r=(392,753) detected_l=(382,982)
+    #  重复 3 次,即卡在地图左边缘)。
+    # 改用 _collect_land_cells 的 span 一致性校验处理滚动(滚动无关的真假判别)。
 
     # ================================================================
     # 锚点识别 + 网格构建
@@ -343,48 +310,51 @@ class LandScanTask:
         anchor_span: tuple[int, int] | None = None,
         prefer_anchor: str = 'right',
     ) -> list[LandCell]:
-        """识别左右锚点并推算地块网格。
+        """识别左右锚点并推算地块网格(滚动无关的真假判别)。
 
-        决策树（治本 + 兜底）：
-        - 两边锚点都 detected 且 plausibility OK → 用 detected（最准）
-        - 单边 detected + 单边缺失 → detected 边保留，缺失边用基线补
-        - 两边都 detected 但都被 plausibility 拒 → **滑动后位置完全错位**，
-          放弃本轮（return []），宁可漏扫不误点荒地
-        - 两边都缺失 → 用基线（理论上滑回默认视图后会发生此情况）
+        决策树(span 校验 + 兜底):
+        - 两边 detected 且 span 一致 → 信任(滚动无关,视图在任意位置都能算对网格)
+        - 两边 detected 但 span 不一致 → 误识别对,放弃本轮
+        - 单边 detected 且接近基线 → 信任 + 用 span 推算缺失边(正常默认视图)
+        - 单边 detected 但偏离基线 → 放弃本轮(防基线回退把网格算到荒地/仓库)
+        - 两边都缺失 → 本轮跳过
         """
         cv_img = bot_engine._capture_only(rect)
         if cv_img is None:
             return []
         right_anchor, left_anchor = _detect_land_anchors(bot_engine, cv_img)
-        right_ok = _anchor_plausibility_ok(right_anchor, LAND_RIGHT_ANCHOR_BASELINE, cv_img)
-        left_ok = _anchor_plausibility_ok(left_anchor, LAND_LEFT_ANCHOR_BASELINE, cv_img)
-        # 两边都 detected 但都被拒：滑动后位置错位，基线回退会把网格算到荒地
-        if right_anchor is not None and left_anchor is not None and not right_ok and not left_ok:
-            logger.warning(
-                f"地块巡查: 左右锚点都被拒(滑动后位置错位)，放弃本轮扫描 | "
-                f"detected_r={right_anchor} detected_l={left_anchor}"
+        # 核心:用 span 一致性替代"必须靠近基线"的判定。
+        # 视图滚动后两个真锚点整体平移,span(左右间距)不变 → 一致即信任(滚动无关)。
+        # 误识别对(把仓库/商店当成锚点)span 几乎必然偏离基线 span → 拒。
+        if right_anchor is not None and left_anchor is not None:
+            if not _anchors_pair_consistent(right_anchor, left_anchor, cv_img):
+                logger.warning(
+                    f"地块巡查: 左右锚点 span 不一致(疑似误识别),放弃本轮 | "
+                    f"detected_r={right_anchor} detected_l={left_anchor}"
+                )
+                return []
+            logger.info(
+                f"地块巡查: 左右锚点 span 一致,信任检测值 | r={right_anchor} l={left_anchor}"
             )
-            return []
-        # 单边偏离基线：替换为基线位置（缩放到当前帧）
-        if right_anchor is not None and not right_ok:
-            fb = _scaled_baseline_anchor(cv_img, LAND_RIGHT_ANCHOR_BASELINE)
-            fallback_r = (int(round(fb[0])), int(round(fb[1])))
-            logger.warning(
-                f"地块巡查: 右锚点偏离基线过远，回退基线 | detected={right_anchor} "
-                f"baseline={fallback_r}"
-            )
-            right_anchor = fallback_r
-        if left_anchor is not None and not left_ok:
-            fb = _scaled_baseline_anchor(cv_img, LAND_LEFT_ANCHOR_BASELINE)
-            fallback_l = (int(round(fb[0])), int(round(fb[1])))
-            logger.warning(
-                f"地块巡查: 左锚点偏离基线过远，回退基线 | detected={left_anchor} "
-                f"baseline={fallback_l}"
-            )
-            left_anchor = fallback_l
-        if right_anchor is None and left_anchor is None:
-            logger.warning("地块巡查: 左右锚点均不可信，本轮跳过扫描以防误点")
-            return []
+        else:
+            # 单边/全空:保留基线 plausibility 兜底。
+            # 单边 detected 且偏离基线 → 滚动后该锚点已飘到非农田区,
+            # 基线回退会把网格算到荒地/仓库 → 放弃本轮(宁可漏扫不误点)。
+            right_ok = _anchor_plausibility_ok(right_anchor, LAND_RIGHT_ANCHOR_BASELINE, cv_img)
+            left_ok = _anchor_plausibility_ok(left_anchor, LAND_LEFT_ANCHOR_BASELINE, cv_img)
+            if right_anchor is not None and not right_ok:
+                logger.warning(
+                    f"地块巡查: 右锚点偏离基线(滚动后单边偏移),放弃本轮 | detected={right_anchor}"
+                )
+                return []
+            if left_anchor is not None and not left_ok:
+                logger.warning(
+                    f"地块巡查: 左锚点偏离基线(滚动后单边偏移),放弃本轮 | detected={left_anchor}"
+                )
+                return []
+            if right_anchor is None and left_anchor is None:
+                logger.warning("地块巡查: 左右锚点均未检测到,本轮跳过扫描")
+                return []
         _before_r, _before_l = right_anchor, left_anchor
         right_anchor, left_anchor = _normalize_anchor_pair(
             right_anchor,
@@ -1270,6 +1240,50 @@ def _anchor_plausibility_ok(
     dx = anchor[0] - expected[0]
     dy = anchor[1] - expected[1]
     return (dx * dx + dy * dy) ** 0.5 <= tol
+
+
+def _anchors_pair_consistent(
+    right_anchor: tuple[int, int] | None,
+    left_anchor: tuple[int, int] | None,
+    cv_img,
+    tol_ratio: float = 0.2,
+) -> bool:
+    """检查 detected 左右锚点是否构成有效锚点对(span ≈ 基线 span)。
+
+    核心:左右锚点是农田中两个**固定**的按钮,间距不随视图滚动改变。
+    因此 span 校验是**滚动无关**的真假判别:真锚点对无论视图怎么滚 span 都不变,
+    误识别对(把仓库/商店/树当成锚点)span 几乎必然偏离。
+
+    替代了原先"detected 必须接近基线"的判定 — 后者在视图滚动后把真锚点
+    也判为不可信,导致整轮放弃。
+
+    Args:
+        right_anchor: BTN_LAND_RIGHT 检测位置。
+        left_anchor: BTN_LAND_LEFT 检测位置。
+        cv_img: 当前帧,用于按帧尺寸缩放基线 span。
+        tol_ratio: span 长度相对容差。检测抖动 ~3-7px + 轻微透视,
+            0.2 ≈ 基线 span (228px) 上 46px 余量,够用且对误识别对足够严格。
+
+    Returns:
+        True = 两点构成合理锚点对(无论是否在默认位置)。
+    """
+    if right_anchor is None or left_anchor is None:
+        return True  # 缺一边不算不合理,由后续逻辑处理
+    if getattr(cv_img, 'shape', None) is None:
+        h, w = LAND_SCAN_FRAME_HEIGHT, LAND_SCAN_FRAME_WIDTH
+    else:
+        h, w = int(cv_img.shape[0]), int(cv_img.shape[1])
+    sx = w / LAND_SCAN_FRAME_WIDTH
+    sy = h / LAND_SCAN_FRAME_HEIGHT
+    expected_dx = LAND_ANCHOR_SPAN_BASELINE[0] * sx
+    expected_dy = LAND_ANCHOR_SPAN_BASELINE[1] * sy
+    expected_mag = math.hypot(expected_dx, expected_dy)
+    if expected_mag <= 1e-6:
+        return False
+    actual_dx = left_anchor[0] - right_anchor[0]
+    actual_dy = left_anchor[1] - right_anchor[1]
+    actual_mag = math.hypot(actual_dx, actual_dy)
+    return abs(actual_mag - expected_mag) / expected_mag <= tol_ratio
 
 
 def _normalize_anchor_pair(
