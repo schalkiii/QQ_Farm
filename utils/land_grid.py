@@ -6,14 +6,26 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-LAND_GRID_SLOPE_COL = -0.5091743119
-LAND_GRID_SLOPE_ROW = 0.5091743119
-LAND_RIGHT_ANCHOR_BASELINE = (490.0, 559.0)
-LAND_LEFT_ANCHOR_BASELINE = (51.0, 602.0)
+# 16:9 截图（760x1490）实测：农场是 4 行 × 6 列平行四边形。
+#   - 1-1（右上角地块中心）≈ (560, 770)
+#   - 1-4（右下角，BTN_LAND_RIGHT 锚点）≈ (350, 980)
+#   - 6-1（左上角）≈ (210, 920)
+#   - 6-4（左下角，BTN_LAND_LEFT 锚点）≈ (70, 1090)
+# 760x1490 → 581x1054 基线换算后：
+LAND_GRID_SLOPE_COL = -0.372
+LAND_GRID_SLOPE_ROW = -0.926
+LAND_RIGHT_ANCHOR_BASELINE = (268.0, 693.0)
+LAND_LEFT_ANCHOR_BASELINE = (54.0, 771.0)
 LAND_ANCHOR_SPAN_BASELINE = (
     LAND_LEFT_ANCHOR_BASELINE[0] - LAND_RIGHT_ANCHOR_BASELINE[0],
     LAND_LEFT_ANCHOR_BASELINE[1] - LAND_RIGHT_ANCHOR_BASELINE[1],
 )
+# 实测：col_step ≈ (-43, 16)，row_step ≈ (54, -50)。
+# get_lands_from_land_anchor 旧版用 step_cols=6/step_rows=4 解 2×2 方程，
+# 但 anchor span 仅是底行（5 col_step），row 方向信息不足 → 解出的 row_step 几乎为 0，
+# 整张网格被压扁。直接用以下实测向量（基线帧 581x1054）。
+LAND_COL_STEP_BASELINE = (-43.0, 16.0)
+LAND_ROW_STEP_BASELINE = (54.0, -50.0)
 
 
 @dataclass(frozen=True)
@@ -99,6 +111,8 @@ def get_lands_from_land_anchor(
     slope_row: float = LAND_GRID_SLOPE_ROW,
     start_anchor: str = 'right',
     anchor_span: tuple[int, int] | tuple[float, float] | None = None,
+    fixed_col_step: tuple[float, float] | None = None,
+    fixed_row_step: tuple[float, float] | None = None,
 ) -> list[LandCell]:
     """Build land-center points from left/right land anchor positions.
 
@@ -140,20 +154,16 @@ def get_lands_from_land_anchor(
     ux, uy = _unit_by_slope(float(slope_col))
     vx, vy = _unit_by_slope(float(slope_row))
 
-    m00 = float(step_cols) * ux
-    m01 = float(step_rows) * vx
-    m10 = float(step_cols) * uy
-    m11 = float(step_rows) * vy
-    det = m00 * m11 - m01 * m10
-    if abs(det) <= 1e-6:
-        return []
-
-    scale_col = (delta_x * m11 - delta_y * m01) / det
-    scale_row = (m00 * delta_y - m10 * delta_x) / det
-    col_step_x = ux * scale_col
-    col_step_y = uy * scale_col
-    row_step_x = vx * scale_row
-    row_step_y = vy * scale_row
+    # 优先用固定 step 向量（基线帧 → 当前帧缩放后传入）。
+    # 否则用 2x2 矩阵从 anchor span + 坡度反解（当 step_cols/step_rows
+    # 与 anchor span 物理含义不一致时，row_step 会被压扁，禁用之）。
+    if fixed_col_step is not None and fixed_row_step is not None:
+        col_step_x = float(fixed_col_step[0])
+        col_step_y = float(fixed_col_step[1])
+        row_step_x = float(fixed_row_step[0])
+        row_step_y = float(fixed_row_step[1])
+    else:
+        return []  # 旧解法在 anchor span 仅有底行信息时会把 row_step 压成 0，禁用之
 
     lands_raw: list[LandCell] = []
     for r in range(cell_rows):

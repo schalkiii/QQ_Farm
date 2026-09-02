@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import os
 import re
 import time
+from datetime import datetime
+
+import cv2
 
 from loguru import logger
 
 from core.cv_detector import BASE_SCALES, DetectResult
 from utils.land_grid import (
     LAND_ANCHOR_SPAN_BASELINE,
+    LAND_COL_STEP_BASELINE,
     LAND_LEFT_ANCHOR_BASELINE,
+    LAND_ROW_STEP_BASELINE,
     LandCell,
     get_lands_from_land_anchor,
 )
@@ -301,17 +306,26 @@ class LandScanTask:
         if cv_img is None:
             return []
         right_anchor, left_anchor = _detect_land_anchors(bot_engine, cv_img)
-        # 合理性校验：锚点偏离基线过远视为误识别（根治误点仓库/商店）
+        # 合理性校验：锚点偏离基线过远视为误识别（根治误点仓库/商店）。
+        # 误识别的锚点直接用基线位置（缩放到当前帧）替换，而不是设为 None——
+        # 否则后续会用 scaled_span 推算另一侧，scaled_span 是基线帧的常数、
+        # 与"被拒的错锚点"叠加会产生更严重的偏移。
         if not _anchor_plausibility_ok(right_anchor, LAND_RIGHT_ANCHOR_BASELINE, cv_img):
+            fb = _scaled_baseline_anchor(cv_img, LAND_RIGHT_ANCHOR_BASELINE)
+            fallback_r = (int(round(fb[0])), int(round(fb[1])))
             logger.warning(
-                f"地块巡查: 右锚点偏离基线过远，视为误识别 | pos={right_anchor}"
+                f"地块巡查: 右锚点偏离基线过远，回退基线 | detected={right_anchor} "
+                f"baseline={fallback_r}"
             )
-            right_anchor = None
+            right_anchor = fallback_r
         if not _anchor_plausibility_ok(left_anchor, LAND_LEFT_ANCHOR_BASELINE, cv_img):
+            fb = _scaled_baseline_anchor(cv_img, LAND_LEFT_ANCHOR_BASELINE)
+            fallback_l = (int(round(fb[0])), int(round(fb[1])))
             logger.warning(
-                f"地块巡查: 左锚点偏离基线过远，视为误识别 | pos={left_anchor}"
+                f"地块巡查: 左锚点偏离基线过远，回退基线 | detected={left_anchor} "
+                f"baseline={fallback_l}"
             )
-            left_anchor = None
+            left_anchor = fallback_l
         if right_anchor is None and left_anchor is None:
             logger.warning("地块巡查: 左右锚点均不可信，本轮跳过扫描以防误点")
             return []
@@ -356,12 +370,15 @@ class LandScanTask:
             rows=LAND_SCAN_ROWS, cols=LAND_SCAN_COLS,
             start_anchor='right',
             anchor_span=effective_span,
+            fixed_col_step=_scaled_col_step(cv_img),
+            fixed_row_step=_scaled_row_step(cv_img),
         )
         logger.info(
             f'地块巡查: 网格识别 | 右锚点={right_anchor} '
             f'左锚点={left_anchor} 地块={len(cells)}'
         )
         cells = LandScanTask._exclude_bottom_toolbar_cells(cells, cv_img)
+        LandScanTask._save_grid_debug(cv_img, cells, right_anchor, left_anchor, prefer_anchor)
         return cells
 
     # ================================================================
@@ -423,6 +440,47 @@ class LandScanTask:
                 f'(y>{bottom_limit})的网格点，防误点图鉴/装扮/仓库/好友按钮'
             )
         return filtered
+
+    # ================================================================
+    # 网格调试可视化
+    # ================================================================
+
+    @staticmethod
+    def _save_grid_debug(
+        cv_img, cells: list[LandCell],
+        right_anchor, left_anchor, side: str,
+    ) -> None:
+        """调试：把网格点 + 左右锚点 + 工具栏边界画在截图原图上存盘。
+
+        用于核对 land_grid 推算的网格与真实地块是否对齐；跑一次地块巡查
+        后查看 debug/land_scan_grid_<side>.png 即可定位偏差。
+        """
+        try:
+            img = cv_img.copy()
+            h, w = img.shape[:2]
+            for c in cells:
+                x, y = int(c.center[0]), int(c.center[1])
+                cv2.circle(img, (x, y), 7, (0, 0, 255), 2)
+                cv2.putText(
+                    img, c.label, (x + 7, y - 7),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 255), 1, cv2.LINE_AA,
+                )
+            if right_anchor:
+                cv2.circle(img, (int(right_anchor[0]), int(right_anchor[1])), 12, (0, 255, 0), 2)
+            if left_anchor:
+                cv2.circle(img, (int(left_anchor[0]), int(left_anchor[1])), 12, (255, 0, 0), 2)
+            limit = int(h * 0.93)
+            cv2.line(img, (0, limit), (w, limit), (255, 255, 0), 1)
+            d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'debug')
+            os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, f'land_scan_grid_{side}.png')
+            cv2.imwrite(path, img)
+            logger.info(
+                f'地块巡查: 调试网格图已存 {path} | cells={len(cells)} '
+                f'右锚点={right_anchor} 左锚点={left_anchor}'
+            )
+        except Exception as e:
+            logger.debug(f'地块巡查: 调试存图失败 {e}')
 
     # ================================================================
     # 物理列扫描
@@ -1093,14 +1151,52 @@ def _scaled_anchor_span(cv_img) -> tuple[int, int]:
     return int(round(float(base_dx) * sx)), int(round(float(base_dy) * sy))
 
 
+def _scaled_col_step(cv_img) -> tuple[float, float]:
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 col_step。"""
+    try:
+        height, width = cv_img.shape[:2]
+    except Exception:
+        width, height = LAND_SCAN_FRAME_WIDTH, LAND_SCAN_FRAME_HEIGHT
+    sx = float(width) / float(LAND_SCAN_FRAME_WIDTH)
+    sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
+    return (float(LAND_COL_STEP_BASELINE[0]) * sx,
+            float(LAND_COL_STEP_BASELINE[1]) * sy)
+
+
+def _scaled_row_step(cv_img) -> tuple[float, float]:
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 row_step。"""
+    try:
+        height, width = cv_img.shape[:2]
+    except Exception:
+        width, height = LAND_SCAN_FRAME_WIDTH, LAND_SCAN_FRAME_HEIGHT
+    sx = float(width) / float(LAND_SCAN_FRAME_WIDTH)
+    sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
+    return (float(LAND_ROW_STEP_BASELINE[0]) * sx,
+            float(LAND_ROW_STEP_BASELINE[1]) * sy)
+
+
+def _scaled_baseline_anchor(cv_img, baseline: tuple[float, float]) -> tuple[float, float]:
+    """把基线帧 581x1054 标定的锚点缩放到当前截图。"""
+    try:
+        height, width = cv_img.shape[:2]
+    except Exception:
+        width, height = LAND_SCAN_FRAME_WIDTH, LAND_SCAN_FRAME_HEIGHT
+    sx = float(width) / float(LAND_SCAN_FRAME_WIDTH)
+    sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
+    return (float(baseline[0]) * sx, float(baseline[1]) * sy)
+
+
 # 基线帧（LAND_SCAN_FRAME_WIDTH x LAND_SCAN_FRAME_HEIGHT）中右锚点坐标
 # = 左锚点基线 - 左到右跨度（即 LAND_LEFT - LAND_ANCHOR_SPAN_BASELINE）
 LAND_RIGHT_ANCHOR_BASELINE: tuple[float, float] = (
     LAND_LEFT_ANCHOR_BASELINE[0] - LAND_ANCHOR_SPAN_BASELINE[0],
     LAND_LEFT_ANCHOR_BASELINE[1] - LAND_ANCHOR_SPAN_BASELINE[1],
 )
-# 锚点合理性最大允许偏差（基线帧像素，按当前帧缩放）
-LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST = 260
+# 锚点合理性最大允许偏差（基线帧像素，按当前帧缩放）。
+# 收紧到 100：实测 16:9 截图 (760x1490) 中误识别的左锚点 (46,950)
+# 距基线缩放位置 (71,1090) 有 142px，260 容差放它通过 → 整张网格被拉歪。
+# 100 容差既能拒掉 142px 的误识别，又给真实锚点小范围抖动留余量。
+LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST = 100
 
 
 def _anchor_plausibility_ok(
