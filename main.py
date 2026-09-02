@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication, QAbstractSpinBox, QWidget, QComboBox
 from PyQt6.QtCore import QObject, QEvent
+from PyQt6.QtGui import QIcon
 
 from models.config import AppConfig
 from gui.main_window import MainWindow
@@ -121,6 +122,12 @@ def main():
     QApplication.setDesktopSettingsAware(False)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    # 应用图标（onefile 打包时从 _MEIPASS 解析，源码运行时从脚本目录解析）
+    _icon_base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    _icon_path = os.path.join(_icon_base, 'app_icon.ico')
+    if os.path.exists(_icon_path):
+        app.setWindowIcon(QIcon(_icon_path))
 
     # 主题配色与对话框样式由 gui/main_window 的 _apply_global_settings 统一管理
     # （依据用户选择的 浅色/深色/跟随系统，并对照 qfluentwidgets 主题）。

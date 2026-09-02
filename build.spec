@@ -11,6 +11,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('templates', 'templates'),
+        ('app_icon.ico', '.'),
         ('gui/icons', 'gui/icons'),
         ('configs', 'configs'),
         (os.path.join(_rapidocr_dir, 'config.yaml'), 'rapidocr_onnxruntime'),
@@ -36,5 +37,5 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    icon=None,
+    icon='app_icon.ico',
 )
