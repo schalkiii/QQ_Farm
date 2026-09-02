@@ -273,6 +273,21 @@ Web 服务依赖 `fastapi` 和 `uvicorn`，在 `requirements.txt` 中作为可�
 - **v2.0.4**：一键务农合并除草/浇水/除虫，新增活动作物。
 - **v2.0.0**：多实例、任务调度、模板与种子/商店/仓库体系大规模升级。
 
+## 近期修复记录（高 DPI 截图与稳定性）
+
+相对上游的核心 bugfix 已通过 PR #11 提交（保守版：不含 `AGENTS.md`，`auto_start` 默认关闭）。每点含「修改前问题 → 为什么改」：
+
+- **`main.py` DPI 感知（核心）**：修改前进程 DPI Unaware，150% 缩放下 `GetWindowRect` 返回逻辑像素 `563×1026`，`PrintWindow` 截图只截到左上角约 2/3，底部工具栏（一键务农 / 仓库 / 商店 / 图鉴 / 装扮 / 好友）整排被裁，相关按钮永远检测不到、任务永不触发；`btn_一键务农` 最佳置信度仅 0.46。改为所有 Qt 导入前 `SetProcessDpiAwareness(2)`（回退 `SetProcessDPIAware`），`GetWindowRect` 变物理像素 `844×1539`，置信度 0.46→0.94 并真实点击走完流程。
+- **`core/scene_detector.py` 提前算 `has_land`**：修改前自己农场被 `friend_check` 误判为好友列表，导致依赖 `FARM_OVERVIEW` 的任务（一键务农、偷菜）永不触发；改为基于 land 锚点提前判定。
+- **`core/window_manager.py` 窗口自愈**：修改前窗口被拖出屏幕后点击全落空、场景检测死循环；改为检测到窗口中心离屏自动拉回可见区域。
+- **`core/bot_engine.py` 每轮同步 rect/handle**：修改前窗口运行中移位 / 缩放后缓存过期、点击坐标错位；改为每轮重取窗口 rect/handle。
+- **`tasks/land_scan.py` 锚点 plausibility + 种植状态**：修改前误识别锚点通过成对间距校验导致网格歪到仓库 / 商店区误点，已种植分支仅凭 `not countdown` 误标 `need_planting`；改为锚点位置合理性校验（单边偏离丢弃、双边不可信跳过本轮，宁可漏扫不误点）+ 已种植分支「无倒计时且无作物状态」才标不需种植。
+- **`core/strategies/plant.py` 空地网格校验 + 阈值自适应**：修改前只按模板名（`land_*`）过滤候选导致误点已种植地块，且像素阈值（400/45）硬编码在 DPI 修复后失配；改为每个 `land_empty` 中心须落在最近真实地块中心 ±45px 内，阈值按基线帧（`581×1054`）比例缩放 `_scale`，适配任意 DPI / 分辨率。
+- **`gui/main_window.py` + `models/config.py` `auto_start`**：修改前启动 exe 需手动点「开始」；新增 `auto_start` 配置，**默认关闭**（避免无值守自启，用户可显式开启）。
+- **`core/debug_capture.py`**：运行时按场景 / 标签保存截图 + 结构化 JSON，供排查模板匹配。
+- **`build.bat`**：修正 onefile 产物验证路径（原按 onedir 校验必失败）。
+- **`templates/btn_一键务农.png`**：更新模板适配 DPI 修复后的更清晰画面。
+
 ## 代码质量与 Lint
 
 项目使用 `ruff` / `pyflakes` 做静态检查。本轮清理聚焦**确定性、零风险的真实缺陷**，未做大规模风格重构：
@@ -289,7 +304,7 @@ Web 服务依赖 `fastapi` 和 `uvicorn`，在 `requirements.txt` 中作为可�
 ## 已知限制
 
 - 自动买种已加入价格校验和仓库格子复查，但商店商品识别仍需真实窗口实测；建议保留 `shop_` 模板兜底，识别不稳时关闭自动买种。
-- 非 16:9 或高 DPI 环境可能出现坐标偏差，需重新采集模板或调整窗口位置。
+- 高 DPI 屏幕已通过进程级 `PROCESS_PER_MONITOR_DPI_AWARE`(见 `main.py`)修复坐标虚拟化:截图按物理像素采集,不再因 DPI 导致底部工具栏被裁 / 按钮检测不到。仍建议标准比例显示器以保证模板匹配稳定。
 - OCR 功能受窗口缩放、字体渲染、截图质量影响，选择账号、个人信息、地块巡查、买种均可能需要实测；紫晶土地依赖 `icon_land_amethyst.png` 模板和 OCR 文本/颜色兜底。
 - 后台模式使用 Windows 消息模拟，部分微信/QQ 容器版本可能表现不一致。
 
