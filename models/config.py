@@ -223,7 +223,7 @@ class LandConfig(BaseModel):
 class AppConfig(BaseModel):
     window_title_keyword: str = "QQ经典农场"
     window_select_rule: str = "auto"  # 'auto' 或 'index:N'
-    auto_start: bool = True  # 启动 exe 后自动开始运行（无需手动点"开始"）；设为 False 则保持手动启动
+    auto_start: bool = False  # 启动 exe 后自动开始运行（无需手动点"开始"）；设为 True 则自动启动（PR 默认关闭，避免无值守自启）
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     screenshot: ScreenshotConfig = Field(default_factory=ScreenshotConfig)
