@@ -7,7 +7,7 @@ from models.farm_state import ActionType
 from core.cv_detector import BASE_SCALES, CVDetector, DetectResult
 from core.scene_detector import Scene, identify_scene
 from core.strategies.base import BaseStrategy
-from utils.land_grid import get_lands_from_land_anchor
+from utils.land_grid import get_lands_from_land_anchor, scaled_col_step, scaled_row_step, scaled_baseline_anchor
 from utils.warehouse_seed_scan import WarehouseSeedScanResult, scan_warehouse_seed_page
 
 # 尝试导入 OCR 模块（可选依赖）
@@ -471,11 +471,20 @@ class PlantStrategy(BaseStrategy):
             (d for d in dets if d.name == 'btn_land_left'), None
         )
         lands = header_filtered
+        # 始终传入固定 step 向量（按当前帧缩放），让网格校验即使只有单锚点
+        # 或锚点位置轻微偏差也能算出 24 个真实地块中心。
+        _fw, _fh = int(cv_img.shape[1]), int(cv_img.shape[0])
+        _col_step = scaled_col_step(_fw, _fh)
+        _row_step = scaled_row_step(_fw, _fh)
         if right_anchor and left_anchor:
             ra = (right_anchor.x, right_anchor.y)
             la = (left_anchor.x, left_anchor.y)
             try:
-                cells = get_lands_from_land_anchor(ra, la)
+                cells = get_lands_from_land_anchor(
+                    ra, la,
+                    fixed_col_step=_col_step,
+                    fixed_row_step=_row_step,
+                )
             except Exception as e:
                 cells = []
                 logger.debug(f"网格计算失败: {e}")
@@ -1417,7 +1426,12 @@ class PlantStrategy(BaseStrategy):
             logger.warning("施肥流程：锚点检测失败，未找到 btn_land_right / btn_land_left")
             return []
 
-        cells = get_lands_from_land_anchor(right_anchor, left_anchor, rows=4, cols=6)
+        _fw, _fh = int(cv_img.shape[1]), int(cv_img.shape[0])
+        cells = get_lands_from_land_anchor(
+            right_anchor, left_anchor, rows=4, cols=6,
+            fixed_col_step=scaled_col_step(_fw, _fh),
+            fixed_row_step=scaled_row_step(_fw, _fh),
+        )
         if not cells:
             logger.warning("施肥流程：锚点网格推算返回 0 个地块")
             return []

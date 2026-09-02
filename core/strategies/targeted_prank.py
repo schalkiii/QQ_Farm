@@ -524,7 +524,7 @@ class TargetedPrankStrategy(BaseStrategy):
 
     def _get_grid_positions(self, rect: tuple) -> list[DetectResult]:
         """锚点检测 → 推算 4x6=24 网格坐标（与施肥 _detect_lands_by_anchor 一致，含重试）"""
-        from utils.land_grid import get_lands_from_land_anchor
+        from utils.land_grid import get_lands_from_land_anchor, scaled_col_step, scaled_row_step
 
         anchor_right = None
         anchor_left = None
@@ -552,7 +552,12 @@ class TargetedPrankStrategy(BaseStrategy):
             logger.warning("定点捣乱: 锚点检测失败 (btn_land_right / btn_land_left)")
             return []
 
-        cells = get_lands_from_land_anchor(anchor_right, anchor_left, rows=4, cols=6)
+        _fw, _fh = int(cv_img.shape[1]), int(cv_img.shape[0])
+        cells = get_lands_from_land_anchor(
+            anchor_right, anchor_left, rows=4, cols=6,
+            fixed_col_step=scaled_col_step(_fw, _fh),
+            fixed_row_step=scaled_row_step(_fw, _fh),
+        )
         if not cells:
             logger.warning("定点捣乱: 锚点网格推算返回 0 个地块")
             return []

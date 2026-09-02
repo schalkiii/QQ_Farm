@@ -211,3 +211,26 @@ def get_lands_from_land_anchor(
         )
         for idx, cell in enumerate(lands_sorted, start=1)
     ]
+
+
+def scaled_col_step(width: int, height: int) -> tuple[float, float]:
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 col_step。"""
+    sx = float(width) / float(581)
+    sy = float(height) / float(1054)
+    return (float(LAND_COL_STEP_BASELINE[0]) * sx,
+            float(LAND_COL_STEP_BASELINE[1]) * sy)
+
+
+def scaled_row_step(width: int, height: int) -> tuple[float, float]:
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 row_step。"""
+    sx = float(width) / float(581)
+    sy = float(height) / float(1054)
+    return (float(LAND_ROW_STEP_BASELINE[0]) * sx,
+            float(LAND_ROW_STEP_BASELINE[1]) * sy)
+
+
+def scaled_baseline_anchor(width: int, height: int, baseline: tuple[float, float]) -> tuple[float, float]:
+    """把基线帧 581x1054 标定的锚点缩放到当前截图。"""
+    sx = float(width) / float(581)
+    sy = float(height) / float(1054)
+    return (float(baseline[0]) * sx, float(baseline[1]) * sy)

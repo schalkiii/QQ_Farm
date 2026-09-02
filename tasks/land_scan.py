@@ -1152,27 +1152,23 @@ def _scaled_anchor_span(cv_img) -> tuple[int, int]:
 
 
 def _scaled_col_step(cv_img) -> tuple[float, float]:
-    """按当前截图尺寸缩放基线帧 581x1054 标定的 col_step。"""
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 col_step（薄包装 land_grid.scaled_col_step）。"""
+    from utils.land_grid import scaled_col_step
     try:
         height, width = cv_img.shape[:2]
     except Exception:
         width, height = LAND_SCAN_FRAME_WIDTH, LAND_SCAN_FRAME_HEIGHT
-    sx = float(width) / float(LAND_SCAN_FRAME_WIDTH)
-    sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
-    return (float(LAND_COL_STEP_BASELINE[0]) * sx,
-            float(LAND_COL_STEP_BASELINE[1]) * sy)
+    return scaled_col_step(int(width), int(height))
 
 
 def _scaled_row_step(cv_img) -> tuple[float, float]:
-    """按当前截图尺寸缩放基线帧 581x1054 标定的 row_step。"""
+    """按当前截图尺寸缩放基线帧 581x1054 标定的 row_step（薄包装 land_grid.scaled_row_step）。"""
+    from utils.land_grid import scaled_row_step
     try:
         height, width = cv_img.shape[:2]
     except Exception:
         width, height = LAND_SCAN_FRAME_WIDTH, LAND_SCAN_FRAME_HEIGHT
-    sx = float(width) / float(LAND_SCAN_FRAME_WIDTH)
-    sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
-    return (float(LAND_ROW_STEP_BASELINE[0]) * sx,
-            float(LAND_ROW_STEP_BASELINE[1]) * sy)
+    return scaled_row_step(int(width), int(height))
 
 
 def _scaled_baseline_anchor(cv_img, baseline: tuple[float, float]) -> tuple[float, float]:
