@@ -244,7 +244,7 @@ FastAPI Web 控制面板（可选，需安装 fastapi+uvicorn）：截图预览�
 
 - `.github/workflows/build.yml` 使用 GitHub Actions 自动打包发布
 - `.github/release-notes/v*.md` 存放自定义 Release Notes
-- v2.0.15 后 Release 直接发布 EXE，避免 Gitee 100MB 限制；GitHub 为主要发行渠道
+- v2.0.15 后 Release 直接发布 EXE（GitHub Releases 为主，无 Gitee 远端）
 
 ### 数据模型
 
@@ -296,6 +296,6 @@ FastAPI Web 控制面板（可选，需安装 fastapi+uvicorn）：截图预览�
 - **停止机制**: 所有策略共享 `_stop_requested` 标志，每个 click 操作前检查，支持优雅停止
 - **安全措施**: 随机点击偏移（`click_offset_range`）、操作间随机延迟、pyautogui FAILSAFE、F11 老板键
 - **中文路径**: `cv_detector.py` 使用 `np.fromfile` + `cv2.imdecode` 读取模板，因为 `cv2.imread` 不支持中文路径
-- **Git 双仓库**: origin → Gitee, github → GitHub。发行版文件发布在 GitHub Releases（Gitee 有 100MB 限制）
+- **Git 双仓库**: `origin` = 上游 `LuckyTiger12138/QQ_Farm`，`github` = 个人 fork `schalkiii/QQ_Farm`（两者都在 GitHub，**无 Gitee 远端**）。改动先 push 到 `github`，再向上游 `origin` 发 PR
 - **配置同步**: `sync_features_to_tasks()` 将旧的 FeaturesConfig 开关映射到新的 TaskScheduleItemConfig.features，保持向后兼容
 - **Task key**: 跨实例捣乱任务使用中文 key `捣乱`，不要再写 `_run_task_prank`

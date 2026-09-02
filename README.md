@@ -4,9 +4,9 @@
 
 > **项目来源**：基于 [LuckyTiger12138/QQ_Farm](https://github.com/LuckyTiger12138/QQ_Farm) 修改，参考 [megumiss/qq-farm-copilot](https://github.com/megumiss/qq-farm-copilot) / [rainnight6/qq-farm-copilot](https://github.com/rainnight6/qq-farm-copilot) 的部分思路。
 
-**仓库**：[GitHub](https://github.com/LuckyTiger12138/QQ_Farm) · [Gitee](https://gitee.com/luckytiger12138/qq-farm)
+**仓库**：[GitHub](https://github.com/LuckyTiger12138/QQ_Farm)
 
-> Gitee 发行版限制 100MB，可执行文件请从 [GitHub Releases](https://github.com/LuckyTiger12138/QQ_Farm/releases) 下载。
+> 本项目主要发布渠道是 [GitHub Releases](https://github.com/LuckyTiger12138/QQ_Farm/releases)，不维护 Gitee 镜像。
 
 ## 当前能力
 
@@ -60,8 +60,8 @@
 **手动安装**：
 
 ```bash
-git clone https://gitee.com/luckytiger12138/qq-farm.git
-cd qq-farm
+git clone https://github.com/LuckyTiger12138/QQ_Farm.git
+cd QQ_Farm
 pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 ```
 

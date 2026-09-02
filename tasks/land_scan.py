@@ -14,9 +14,7 @@ from loguru import logger
 from core.cv_detector import BASE_SCALES, DetectResult
 from utils.land_grid import (
     LAND_ANCHOR_SPAN_BASELINE,
-    LAND_COL_STEP_BASELINE,
     LAND_LEFT_ANCHOR_BASELINE,
-    LAND_ROW_STEP_BASELINE,
     LandCell,
     get_lands_from_land_anchor,
 )
