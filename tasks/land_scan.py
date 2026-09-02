@@ -361,6 +361,7 @@ class LandScanTask:
             f'地块巡查: 网格识别 | 右锚点={right_anchor} '
             f'左锚点={left_anchor} 地块={len(cells)}'
         )
+        cells = LandScanTask._exclude_bottom_toolbar_cells(cells, cv_img)
         return cells
 
     # ================================================================
@@ -398,6 +399,29 @@ class LandScanTask:
             f'地块巡查: 排除未扩建地块 | 排除={sorted(excluded_labels)} '
             f'剩余={len(filtered)}/{len(cells)}'
         )
+        return filtered
+
+    # ================================================================
+    # 底部标签栏排除
+    # ================================================================
+
+    @staticmethod
+    def _exclude_bottom_toolbar_cells(cells: list[LandCell], cv_img) -> list[LandCell]:
+        """排除落在底部标签栏（图鉴/装扮/仓库/好友）的网格点，避免误点工具栏按钮。
+
+        网格最底行在某些窗口尺寸 / 缩放下会落到标签栏区域，点击会误触发
+        图鉴/装扮/仓库/好友按钮。以截图高度 93% 为界，超出者视为工具栏。
+        """
+        if not cells or getattr(cv_img, 'shape', None) is None:
+            return cells
+        h = int(cv_img.shape[0])
+        bottom_limit = int(h * 0.93)
+        filtered = [c for c in cells if c.center[1] <= bottom_limit]
+        if len(filtered) != len(cells):
+            logger.warning(
+                f'地块巡查: 排除 {len(cells) - len(filtered)} 个落在底部标签栏区域'
+                f'(y>{bottom_limit})的网格点，防误点图鉴/装扮/仓库/好友按钮'
+            )
         return filtered
 
     # ================================================================
@@ -1076,7 +1100,7 @@ LAND_RIGHT_ANCHOR_BASELINE: tuple[float, float] = (
     LAND_LEFT_ANCHOR_BASELINE[1] - LAND_ANCHOR_SPAN_BASELINE[1],
 )
 # 锚点合理性最大允许偏差（基线帧像素，按当前帧缩放）
-LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST = 200
+LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST = 260
 
 
 def _anchor_plausibility_ok(
