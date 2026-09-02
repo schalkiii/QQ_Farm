@@ -145,6 +145,8 @@ class BotEngine(QObject):
         # [1] 窗口控制层
         self.window_manager = WindowManager()
         self.screen_capture = ScreenCapture()
+        # 调试截图（与 _debug_event 的 JSONL 事件联动），在 _setup_instance_dirs 按实例目录初始化
+        self.debug_capture = None
 
         # [2] 图像识别层
         self.cv_detector = CVDetector(
@@ -367,6 +369,14 @@ class BotEngine(QObject):
         if hasattr(self.screen_capture, '_save_dir'):
             self.screen_capture._save_dir = str(paths.screenshots_dir)
 
+        # 调试截图：与 _debug_event(JSONL) 联动，PNG 供多模态/人工直接"看"界面状态
+        try:
+            from core.debug_capture import DebugCapture
+            self.debug_capture = DebugCapture(paths.screenshots_dir, enabled=True)
+        except Exception as e:
+            logger.debug(f"DebugCapture 初始化失败: {e}")
+            self.debug_capture = None
+
         self._configure_debug_mode()
         logger.info(f"实例 {self.instance_id} 目录已初始化: {paths.base_dir}")
 
@@ -395,6 +405,33 @@ class BotEngine(QObject):
     def _debug_event(self, event: str, **fields) -> None:
         """写入实例级结构化调试事件。"""
         record_debug_event(self.instance_id, event, **fields)
+
+    def _debug_shot(self, tag: str, *, rect=None, scene=None,
+                    detections=None, extra=None) -> None:
+        """截图 + 结构化事件，供事后（含多模态）分析"卡在哪"。
+
+        截图保存到 instances/{id}/screenshots/（DebugCapture），事件写入
+        task_trace JSONL（_debug_event）。任何异常都不影响主流程。
+        """
+        cap = getattr(self, "debug_capture", None)
+        if cap is None:
+            return
+        try:
+            r = rect
+            if r is None:
+                self._debug_event(tag, **(extra or {}))
+                return
+            img = self._capture_only(r)
+            path = cap.capture(img, tag, scene=scene, detections=detections,
+                               rect=r, extra=extra)
+            if path is not None:
+                ev = dict(extra or {})
+                ev["screenshot"] = str(path)
+                if scene is not None:
+                    ev["scene"] = str(getattr(scene, "value", scene) or "")
+                self._debug_event(tag, **ev)
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"_debug_shot 失败: {e}")
 
     def toggle_game_window(self) -> dict:
         """老板键：切换游戏窗口显示/隐藏（异步执行，不阻塞 GUI）
@@ -1262,6 +1299,7 @@ class BotEngine(QObject):
             if _early_triggers["need_plant"] and features.get("auto_plant"):
                 reasons.append("有空地待播种")
             logger.info(f"地块触发：{', '.join(reasons)}")
+            self._debug_shot("land_trigger", rect=rect, extra={"reasons": reasons})
 
         idle_rounds = 0
         max_idle = 1 if not has_land_trigger else 3  # 触发时增加轮数，确保操作执行
@@ -1278,7 +1316,10 @@ class BotEngine(QObject):
         farm_tasks = [
             ("Popup",   lambda: True,                       lambda s: s in (Scene.POPUP, Scene.INFO_PAGE, Scene.SHOP_PAGE), lambda ctx: self._task_popup(ctx)),
             # 侧边菜单打开时优先收起，否则农场被遮挡导致后续全部失效
-            ("MenuClose", lambda: True,                     lambda s: s == Scene.MENU,                                  lambda ctx: self._task_menu_close(ctx)),
+            # 场景修正为 FARM_OVERVIEW 后 MENU 不再命中，但侧边菜单仍可能开着遮挡
+            # btn_一键务农 等按钮；故在 FARM_OVERVIEW 下也尝试收起。
+            # 内部 quick_detect 未检出 menu_check 时会自动跳过，不会误点。
+            ("MenuClose", lambda: True,                     lambda s: s in (Scene.MENU, _FARM_OVERVIEW),                lambda ctx: self._task_menu_close(ctx)),
             ("Harvest", lambda: _f.auto_harvest,             lambda s: s == _FARM_OVERVIEW,                                 lambda ctx: self._task_harvest(ctx)),
             ("Maintain",lambda: _f.auto_maintain,                    lambda s: s == _FARM_OVERVIEW,                                 lambda ctx: self._task_maintain(ctx)),
             ("Plant",   lambda: _f.auto_plant and not self._plant_done, lambda s: s == _FARM_OVERVIEW,                       lambda ctx: self._task_plant(ctx)),
@@ -1288,16 +1329,24 @@ class BotEngine(QObject):
         ]
 
         def execute_farm_tasks(ctx: dict) -> bool:
-            """按优先级执行匹配的任务，返回是否有任务实际执行了操作"""
+            """按优先级执行匹配的任务，返回是否有（非菜单收起类的）任务实际执行了操作。
+
+            MenuClose 仅作为前置清理：它执行成功**不独占本轮**，后续 Harvest/Maintain/
+            Plant 等仍会继续运行。否则 menu_check 误检时会每轮都 return True，导致排在
+            其后的 一键务农（Maintain）永远轮不到（实况：menu_check 在同帧误匹配 6 处，
+            MenuClose 每轮"成功"后本轮直接结束，maintain_attempt 截图一张都没有）。
+            """
             scene = ctx.get("scene")
+            did_work = False
             for name, enabled_fn, check_fn, run_fn in farm_tasks:
                 try:
                     if enabled_fn() and check_fn(scene):
-                        if run_fn(ctx):
-                            return True
+                        ran = run_fn(ctx)
+                        if ran and name != "MenuClose":
+                            did_work = True
                 except Exception as e:
                     logger.debug(f'[check_farm] 任务 {name} 异常: {e}')
-            return False
+            return did_work
 
         # 主循环
         for round_num in range(1, 51):
@@ -1309,7 +1358,8 @@ class BotEngine(QObject):
             window = self.window_manager.refresh_window_info(
                 self.config.window_title_keyword,
                 auto_launch=False,
-                shortcut_path=""
+                shortcut_path="",
+                window_position=self.config.safety.window_position,
             )
             if not window:
                 logger.warning("游戏窗口已关闭，尝试自动重启...")
@@ -1342,6 +1392,15 @@ class BotEngine(QObject):
                     )
                     self.log_message.emit(f"游戏已自动重启，窗口: {window.title}")
 
+            else:
+                # 窗口一直存在：每轮同步最新 rect/handle，防止运行中窗口移位后坐标错位
+                rect = (window.left, window.top, window.width, window.height)
+                if self.action_executor:
+                    self.action_executor.update_window_rect(rect)
+                    self.action_executor.update_window_handle(
+                        window.hwnd if self.config.safety.run_mode == RunMode.BACKGROUND else None
+                    )
+
             cv_image, detections = self._fast_capture_and_detect(
                 rect, extra_names=LAND_TEMPLATES
             )
@@ -1353,6 +1412,12 @@ class BotEngine(QObject):
             scene = identify_scene(detections, self.cv_detector, cv_image)
             det_summary = ", ".join(f"{d.name}({d.confidence:.0%})" for d in detections[:6])
             logger.debug(f"[轮{round_num}] 场景={scene.value} | {det_summary}")
+            # 调试截图：每轮记录 bot 所见；非 farm_overview 时截图是排查卡点的关键证据
+            self._debug_shot(
+                f"scene_{scene.value}", rect=rect, scene=scene,
+                detections=detections,
+                extra={"round": round_num, "det_summary": det_summary},
+            )
             
             # ✅ 状态变化检测：避免重复相同检测
             # 构建当前状态的指纹（场景 + 关键按钮集合）
@@ -1557,6 +1622,11 @@ class BotEngine(QObject):
         """维护任务（除草/除虫/浇水）- 统一循环，共享确认计时器"""
         rect = context.get("rect")
         features = context.get("features", {})
+        # 调试：记录一键务农尝试时 bot 所见，确认 btn_一键务农 是否真的在屏上
+        self._debug_shot(
+            "maintain_attempt", rect=rect, scene=Scene.FARM_OVERVIEW,
+            extra={"auto_maintain": features.get("auto_maintain", True)},
+        )
         desc = self.maintain.try_maintain_direct(rect, features)
         if desc:
             context.setdefault("actions_done", []).append(desc)

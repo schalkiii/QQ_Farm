@@ -46,3 +46,6 @@ instances/update_check_cache.json
 # 配置备份文件
 instances/*/configs/config.*backup*.json
 instances/*/configs/config.before_*.json
+
+# CodeBuddy 工作目录（记忆/自动化/缓存，非项目代码）
+.codebuddy/

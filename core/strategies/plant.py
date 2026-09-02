@@ -428,11 +428,97 @@ class PlantStrategy(BaseStrategy):
         cv_img, dets, _ = self.capture(rect)
         if cv_img is None:
             return all_actions
-        # 只选择真正的空地（所有 land_ 前缀的模板）
-        lands = [d for d in dets if d.name.startswith("land_")]
-        lands.sort(key=lambda d: d.confidence, reverse=True)  # 按置信度排序
+        # 调试日志：列出所有 land_empty 检测（含坐标+置信度），便于排查误识别
+        lands_all = [d for d in dets if d.name.startswith("land_empty")]
+        if lands_all:
+            for d in sorted(lands_all, key=lambda x: -x.confidence):
+                w = getattr(d, 'w', 0) or 0
+                h = getattr(d, 'h', 0) or 0
+                cx = d.x + w // 2
+                cy = d.y + h // 2
+                logger.debug(
+                    f"land_empty 检测: {d.name} conf={d.confidence:.0%} "
+                    f"bbox=({d.x},{d.y},{w}x{h}) center=({cx},{cy})"
+                )
+
+        # 像素阈值统一按地块网格基线帧（581x1054，与 tasks/land_scan.py 的
+        # LAND_SCAN_FRAME_HEIGHT 一致）比例缩放，以适配任意窗口尺寸与系统
+        # DPI 缩放。原先的 400 / 45 是在进程 DPI Unaware、截图被虚拟化成
+        # 563x1026 时标定的；修复 DPI 感知后画面按 1.5x 变大，绝对值会失配。
+        _base_h = 1054.0
+        _frame_h = (
+            float(cv_img.shape[0])
+            if getattr(cv_img, 'shape', None) is not None
+            else _base_h
+        )
+        _scale = _frame_h / _base_h
+
+        # 过滤顶部误识别（头像/等级区，基线帧中约 y<400）
+        header_y_threshold = int(400 * _scale)
+        header_filtered = [d for d in lands_all if d.y >= header_y_threshold]
+        if len(header_filtered) < len(lands_all):
+            logger.debug(
+                f"过滤顶部误识别空地: {len(lands_all)} -> {len(header_filtered)} (y<{header_y_threshold})"
+            )
+
+        # 网格校验：只有检测中心落在 24 个真实地块中心附近才信
+        # 根治 land_empty 误压已种植地块/下方装饰区（23:30 实况：23 块全种满，
+        # land_empty3 仍以 76% 命中 (375,808)/(426,783) 压在红土地块上）
+        right_anchor = next(
+            (d for d in dets if d.name in ('btn_land_right', 'btn_land_right_2')), None
+        )
+        left_anchor = next(
+            (d for d in dets if d.name == 'btn_land_left'), None
+        )
+        lands = header_filtered
+        if right_anchor and left_anchor:
+            ra = (right_anchor.x, right_anchor.y)
+            la = (left_anchor.x, left_anchor.y)
+            try:
+                cells = get_lands_from_land_anchor(ra, la)
+            except Exception as e:
+                cells = []
+                logger.debug(f"网格计算失败: {e}")
+            if cells:
+                tol = max(24.0, 45.0 * _scale)  # 地块中心容差（按帧缩放）
+                cell_centers = [c.center for c in cells]
+                validated = []
+                for d in header_filtered:
+                    w = getattr(d, 'w', 0) or 0
+                    h = getattr(d, 'h', 0) or 0
+                    cx = d.x + w // 2
+                    cy = d.y + h // 2
+                    nearest = min(
+                        cell_centers,
+                        key=lambda p: (p[0] - cx) ** 2 + (p[1] - cy) ** 2,
+                    )
+                    dist = ((nearest[0] - cx) ** 2 + (nearest[1] - cy) ** 2) ** 0.5
+                    if dist <= tol:
+                        validated.append(d)
+                    else:
+                        logger.debug(
+                            f"land_empty {d.name} 中心({cx},{cy}) 偏离最近地块 {dist:.0f}px "
+                            f"(> {tol}px)，判定为误识别"
+                        )
+                if not validated:
+                    logger.info(
+                        f"网格校验: {len(header_filtered)} 个 land_empty 检测均偏离 "
+                        f"24 个真实地块中心，已全部排除（无空地）"
+                    )
+                    return all_actions
+                logger.debug(
+                    f"网格校验: {len(header_filtered)} -> {len(validated)} "
+                    f"(落在地块容差 {tol}px 内)"
+                )
+                lands = validated
+            else:
+                logger.debug("网格计算返回空，回退到头部过滤结果")
+        else:
+            logger.debug("未检测到左右锚点，跳过网格校验，使用头部过滤结果")
+
         if not lands:
             return all_actions
+        lands.sort(key=lambda d: d.confidence, reverse=True)  # 按置信度排序
         total_lands = len(lands)  # 保存总数用于进度显示
         logger.info(f"找到 {len(lands)} 块空地，最高置信度：{lands[0].confidence:.0%}")
 

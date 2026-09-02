@@ -49,10 +49,16 @@ def identify_scene(detections: list[DetectResult], detector: CVDetector,
     if "btn_zhongzi" in names and "btn_warehouse" in names:
         return Scene.WAREHOUSE
 
-    # 好友列表页（有访问按钮或好友列表标识，但没有回家按钮）
-    # 注意：btn_visit_first 和 friend_check 模板可能是全截图，匹配率低
+    # 自己农场特征：能看到农场地块（提前计算。好友列表是列表界面，不会显示地块）
+    has_land = any(n.startswith("land_") for n in names)
+
+    # 好友列表页（有访问按钮或好友列表标识，但没有回家按钮、且当前不是农场画面）
+    # 注意：btn_visit_first 和 friend_check 模板可能是全截图，匹配率低；
+    # friend_check 判别力弱，在自己农场也会稳定命中（日志中长期恒定 91%），
+    # 因此必须排除"能看到地块"的情况，否则自己农场会被误判为好友列表，
+    # 导致依赖 FARM_OVERVIEW 的任务（如一键务农）永不触发。
     if "btn_visit_first" in names or "friend_check" in names:
-        if "btn_home" not in names:
+        if "btn_home" not in names and not has_land:
             return Scene.FRIEND_LIST
 
     if "btn_home" in names:
@@ -76,7 +82,6 @@ def identify_scene(detections: list[DetectResult], detector: CVDetector,
         "btn_friend_help", "btn_expand",
         "ui_goto_friend", "btn_warehouse", "btn_haoyou",
     }
-    has_land = any(n.startswith("land_") for n in names)
     if has_land or (names & farm_indicators):
         return Scene.FARM_OVERVIEW
 

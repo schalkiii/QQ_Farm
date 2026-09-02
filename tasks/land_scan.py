@@ -9,7 +9,12 @@ import time
 from loguru import logger
 
 from core.cv_detector import BASE_SCALES, DetectResult
-from utils.land_grid import LAND_ANCHOR_SPAN_BASELINE, LandCell, get_lands_from_land_anchor
+from utils.land_grid import (
+    LAND_ANCHOR_SPAN_BASELINE,
+    LAND_LEFT_ANCHOR_BASELINE,
+    LandCell,
+    get_lands_from_land_anchor,
+)
 from utils.ocr_utils import OCRItem, OCRTool
 
 # ── 常量 ──────────────────────────────────────────────────────────────
@@ -296,6 +301,21 @@ class LandScanTask:
         if cv_img is None:
             return []
         right_anchor, left_anchor = _detect_land_anchors(bot_engine, cv_img)
+        # 合理性校验：锚点偏离基线过远视为误识别（根治误点仓库/商店）
+        if not _anchor_plausibility_ok(right_anchor, LAND_RIGHT_ANCHOR_BASELINE, cv_img):
+            logger.warning(
+                f"地块巡查: 右锚点偏离基线过远，视为误识别 | pos={right_anchor}"
+            )
+            right_anchor = None
+        if not _anchor_plausibility_ok(left_anchor, LAND_LEFT_ANCHOR_BASELINE, cv_img):
+            logger.warning(
+                f"地块巡查: 左锚点偏离基线过远，视为误识别 | pos={left_anchor}"
+            )
+            left_anchor = None
+        if right_anchor is None and left_anchor is None:
+            logger.warning("地块巡查: 左右锚点均不可信，本轮跳过扫描以防误点")
+            return []
+        _before_r, _before_l = right_anchor, left_anchor
         right_anchor, left_anchor = _normalize_anchor_pair(
             right_anchor,
             left_anchor,
@@ -303,6 +323,21 @@ class LandScanTask:
             allow_fallback=True,
             prefer_anchor=prefer_anchor,
         )
+        # 调试：若一方被误识别丢弃，截图供事后查看两个锚点的实际位置
+        if (_before_r is not None and _before_l is not None
+                and (right_anchor is None) != (left_anchor is None)):
+            _cap = getattr(bot_engine, "debug_capture", None)
+            if _cap is not None:
+                _cap.capture(
+                    cv_img, "land_anchor_discard", scene="land_scan",
+                    extra={
+                        "before": {"right": list(_before_r), "left": list(_before_l)},
+                        "after": {
+                            "right": list(right_anchor) if right_anchor else None,
+                            "left": list(left_anchor) if left_anchor else None,
+                        },
+                    },
+                )
         effective_span = anchor_span
         if effective_span is None and (right_anchor is None) != (left_anchor is None):
             effective_span = _scaled_anchor_span(cv_img)
@@ -728,7 +763,10 @@ class LandScanTask:
             # 回退：用地块中心做粗略 OCR
             countdown = self._ocr_maturity_time_fallback(cv_img, cell.center)
 
-        need_planting = level == 'normal' and not countdown
+        # 已种植分支（未匹配到 land_empty* 空地模板）：地块上应有作物。
+        # 成熟作物同样“无倒计时”，不能仅凭 not countdown 判为待播种，
+        # 否则成熟地块被误标 need_planting → 反复“有空地待播种”却无空地可播。
+        need_planting = False
         updated = self._update_plot(
             bot_engine, cell,
             level=level or 'normal', countdown=countdown,
@@ -1029,6 +1067,43 @@ def _scaled_anchor_span(cv_img) -> tuple[int, int]:
     sy = float(height) / float(LAND_SCAN_FRAME_HEIGHT)
     base_dx, base_dy = LAND_ANCHOR_SPAN_BASELINE
     return int(round(float(base_dx) * sx)), int(round(float(base_dy) * sy))
+
+
+# 基线帧（LAND_SCAN_FRAME_WIDTH x LAND_SCAN_FRAME_HEIGHT）中右锚点坐标
+# = 左锚点基线 - 左到右跨度（即 LAND_LEFT - LAND_ANCHOR_SPAN_BASELINE）
+LAND_RIGHT_ANCHOR_BASELINE: tuple[float, float] = (
+    LAND_LEFT_ANCHOR_BASELINE[0] - LAND_ANCHOR_SPAN_BASELINE[0],
+    LAND_LEFT_ANCHOR_BASELINE[1] - LAND_ANCHOR_SPAN_BASELINE[1],
+)
+# 锚点合理性最大允许偏差（基线帧像素，按当前帧缩放）
+LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST = 200
+
+
+def _anchor_plausibility_ok(
+    anchor: tuple[int, int] | None,
+    expected_baseline: tuple[float, float],
+    cv_img,
+    max_dist: float = LAND_SCAN_ANCHOR_PLAUSIBILITY_DIST,
+) -> bool:
+    """检查锚点是否落在当前帧基线缩放位置的合理范围内（根治误点仓库/商店）。
+
+    锚点模板在固定窗口 581x1054 中标定。检测位置若偏离缩放后基线超过
+    ``max_dist`` 像素，视为误识别（例：右锚点基线缩放至 ~(819,946)，
+    实测 (381,1268) 偏离 438px → 不可信，丢弃）。
+    """
+    if anchor is None:
+        return True  # 缺失的锚点不算不合理，由后续成对校验处理
+    if getattr(cv_img, 'shape', None) is None:
+        h, w = LAND_SCAN_FRAME_HEIGHT, LAND_SCAN_FRAME_WIDTH
+    else:
+        h, w = int(cv_img.shape[0]), int(cv_img.shape[1])
+    sx = w / LAND_SCAN_FRAME_WIDTH
+    sy = h / LAND_SCAN_FRAME_HEIGHT
+    expected = (expected_baseline[0] * sx, expected_baseline[1] * sy)
+    tol = max_dist * max(sx, sy)
+    dx = anchor[0] - expected[0]
+    dy = anchor[1] - expected[1]
+    return (dx * dx + dy * dy) ** 0.5 <= tol
 
 
 def _normalize_anchor_pair(

@@ -1,5 +1,24 @@
 """QQ农场自动化助手 - 程序入口"""
 import os
+import ctypes
+
+# ── 高 DPI 修复：带鱼屏 / 高分辨率屏必需 ────────────────────────────
+# 进程默认是 DPI Unaware，系统会对它做 DPI 虚拟化，导致 GetWindowRect
+# 返回「逻辑像素」（本机 150% 缩放下为 563x1026），而窗口的真实物理
+# 尺寸是 844x1539。ScreenCapture.capture_window_print() 按前者建位图再
+# PrintWindow，只能截到左上角约 2/3 —— 底部工具栏（仓库/商店/一键务农/
+# 图鉴/装扮/好友）整排被裁在画面之外，相关按钮永远检测不到，一键务农等
+# 任务因此永不触发。
+# 必须在创建任何窗口、读取任何 DPI 之前声明 PER_MONITOR_AWARE，
+# 故放在所有 Qt 导入之前。
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:  # 老系统没有 shcore.dll
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
 import sys
 import time

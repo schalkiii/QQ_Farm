@@ -189,7 +189,7 @@ class WindowManager:
             logger.error(f"验证 hwnd {hwnd} 失败: {e}")
         return None
 
-    def find_window(self, title_keyword: str = "QQ 经典农场", auto_launch: bool = False, shortcut_path: str = "", select_rule: str = "auto", select_account_keyword: str = "", saved_hwnd: int = 0) -> WindowInfo | None:
+    def find_window(self, title_keyword: str = "QQ 经典农场", auto_launch: bool = False, shortcut_path: str = "", select_rule: str = "auto", select_account_keyword: str = "", saved_hwnd: int = 0, window_position: WindowPosition | None = None) -> WindowInfo | None:
         """通过标题关键词和选择规则查找窗口，可选自动启动游戏
 
         Args:
@@ -209,12 +209,14 @@ class WindowManager:
                         self._pinned_hwnd = saved_hwnd
                         self._all_claimed_hwnds.add(saved_hwnd)
                         logger.info(f"持久化匹配: 复用上次窗口 hwnd={saved_hwnd} → 实例窗口已恢复")
+                        self._ensure_window_on_screen(valid_window, window_position)
                         return valid_window
 
             # 1. 优先复用已锁定的窗口（防止窗口移动后排序变化导致选错）
             if self._pinned_hwnd:
                 valid_window = self._verify_and_pin_window(self._pinned_hwnd, title_keyword)
                 if valid_window:
+                    self._ensure_window_on_screen(valid_window, window_position)
                     return valid_window
                 else:
                     lost = self._pinned_hwnd
@@ -285,7 +287,9 @@ class WindowManager:
             # 锁定选中的窗口句柄
             self._pinned_hwnd = int(getattr(w, '_hWnd', 0) or 0)
             self._all_claimed_hwnds.add(self._pinned_hwnd)
-            return self._create_window_info(w)
+            info = self._create_window_info(w)
+            self._ensure_window_on_screen(info, window_position)
+            return info
 
         except Exception as e:
             logger.error(f"查找窗口失败：{e}")
@@ -398,9 +402,33 @@ class WindowManager:
             return None
         return self._cached_window.hwnd
 
-    def refresh_window_info(self, title_keyword: str = "QQ 农场", auto_launch: bool = False, shortcut_path: str = "") -> WindowInfo | None:
-        """刷新窗口位置信息，可选自动启动游戏"""
-        return self.find_window(title_keyword, auto_launch, shortcut_path)
+    def refresh_window_info(self, title_keyword: str = "QQ 农场", auto_launch: bool = False, shortcut_path: str = "", window_position: WindowPosition | None = None) -> WindowInfo | None:
+        """刷新窗口位置信息，可选自动启动游戏；window_position 用于窗口移出屏幕时自动拉回"""
+        return self.find_window(title_keyword, auto_launch, shortcut_path, window_position=window_position)
+
+    def _ensure_window_on_screen(self, info: WindowInfo, window_position: WindowPosition | None) -> None:
+        """窗口可见性自愈：若窗口不在屏幕工作区可见范围内（如远程桌面断连 / 被拖出屏幕），
+        自动 MoveWindow 拉回配置的 window_position。否则 PrintWindow 截图正常但 ScreenToClient
+        坐标错位，导致点击全失、侧边菜单收不掉、场景死锁（一键务农等永不触发）。"""
+        if not info:
+            return
+        try:
+            work_area = ctypes.wintypes.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work_area), 0)
+            wl, wt, wr, wb = work_area.left, work_area.top, work_area.right, work_area.bottom
+            # 窗口是否仍与工作区有交集
+            intersects = not (info.left + info.width <= wl or info.top + info.height <= wt
+                              or info.left >= wr or info.top >= wb)
+            if intersects:
+                return
+            pos = window_position or WindowPosition.BOTTOM_LEFT
+            logger.warning(
+                f"窗口不在屏幕可见区域 (left={info.left}, top={info.top}, "
+                f"{info.width}x{info.height})，自动拉回工作区 [{pos.value}]"
+            )
+            self.resize_window(info.width, info.height, pos)
+        except Exception as e:
+            logger.debug(f"窗口可见性自检失败: {e}")
 
     def _list_all_windows(self, title_keyword: str) -> list:
         """列出所有匹配的窗口"""

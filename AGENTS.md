@@ -199,6 +199,8 @@ Pydantic BaseModel 层级结构，`AppConfig.load(path)` / `.save()` 读写 JSON
 - **状态总览**: 仅展示运行状态、任务队列和下次执行时间；操作次数统计与每日动作统计落盘已移除
 - **调试模式**: 勾选后优先查看 `task_trace_YYYY-MM-DD.jsonl` 判断任务是否被禁用、时间窗挡住、没有 runner、配置关闭或恢复链路跳过
 - **构建**: PyInstaller 打包时排除 `easyocr/torch/torchvision`（见 `build.spec`），打包后 `sys._MEIPASS` 为资源目录
-- **Git 双仓库**: origin → Gitee, github → GitHub。发行版发布在 GitHub Releases（Gitee 100MB 限制）
-- `QT_ENABLE_HIGHDPI_SCALING=0` — main.py 中强制禁用高 DPI 缩放
+- **Git 双仓库**: `origin` → 上游 `LuckyTiger12138/QQ_Farm`，`github` → 个人 fork `schalkiii/QQ_Farm`（两者都在 GitHub，无 Gitee 远端）。改动先 push 到 `github`，再向上游 `origin` 提 PR
+- **DPI 感知（高分辨率/带鱼屏必读）**: `main.py` 在所有 Qt 导入之前调用 `SetProcessDpiAwareness(2)`（PER_MONITOR_AWARE），**不可删除或下移**。进程若停留在 DPI Unaware，系统会对坐标做 DPI 虚拟化，`GetWindowRect` 返回逻辑像素（150% 缩放下为 563x1026），而 `ScreenCapture.capture_window_print()` 按该尺寸建位图再 `PrintWindow`，只能截到左上角约 2/3 —— 底部工具栏（仓库/商店/一键务农/图鉴/装扮/好友）整排被裁在画面外，相关按钮永远检测不到、一键务农等任务永不触发。修复前 `btn_一键务农` 最佳置信度仅 0.46，修复后 0.94 且能正常点击走完流程
+- **像素阈值必须按帧缩放**: 地块相关阈值以基线帧 581x1054（`tasks/land_scan.py` 的 `LAND_SCAN_FRAME_WIDTH/HEIGHT`）标定。新增或修改像素常量时要按当前帧尺寸等比缩放，不要写死绝对值
+- `QT_ENABLE_HIGHDPI_SCALING=0` — main.py 中强制禁用 Qt 高 DPI 缩放（与上一条的进程级 DPI 感知是两件事，不要混淆）
 - PyQt6 使用 Fusion 风格 + 强制浅色调色板，覆盖 Windows 暗色主题

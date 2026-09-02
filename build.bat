@@ -22,21 +22,21 @@ if errorlevel 1 (
 )
 
 :: Verify
+:: build.spec 为 onefile 模式（只有 EXE()，无 COLLECT()），产物是单个
+:: dist\QQFarmBot.exe；templates/configs/icons 均已内嵌，不存在
+:: dist\QQFarmBot\_internal\ 目录。此前按 onedir 路径校验导致误报失败。
 echo.
 echo [3/3] Verifying...
-if not exist "dist\QQFarmBot\QQFarmBot.exe" (
+if not exist "dist\QQFarmBot.exe" (
     echo [ERROR] QQFarmBot.exe not found!
     pause
     exit /b 1
 )
-if not exist "dist\QQFarmBot\_internal\templates" (
-    echo [WARNING] templates directory missing!
-)
 
-for %%A in (dist\QQFarmBot\QQFarmBot.exe) do echo EXE: %%~zA bytes
-echo Templates: %~dp0dist\QQFarmBot\_internal\templates
+for %%A in (dist\QQFarmBot.exe) do echo EXE: %%~zA bytes
+echo Mode: onefile - templates/configs/icons 已内嵌，运行时解压到临时目录
 
 echo.
-echo [OK] Build complete! Output: dist\QQFarmBot\
+echo [OK] Build complete! Output: dist\QQFarmBot.exe
 echo.
 pause

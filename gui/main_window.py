@@ -633,7 +633,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(50, self._apply_window_material)
         if self._first_show:
             self._first_show = False
-            QTimer.singleShot(300, self._show_opensource_notice)
+            # 启动即自动运行：满足"启动 exe 就自动开始运行，不要弹窗"
+            if getattr(self.config, "auto_start", True):
+                # auto_start 开启时不再弹开源声明，延迟等窗口/引擎就绪后自动点"开始"
+                QTimer.singleShot(500, self._on_start)
+            else:
+                QTimer.singleShot(300, self._show_opensource_notice)
 
     # ── 全局热键 ──────────────────────────────────────────
 
