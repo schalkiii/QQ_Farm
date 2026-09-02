@@ -210,6 +210,8 @@ class WindowManager:
                         self._all_claimed_hwnds.add(saved_hwnd)
                         logger.info(f"持久化匹配: 复用上次窗口 hwnd={saved_hwnd} → 实例窗口已恢复")
                         self._ensure_window_on_screen(valid_window, window_position)
+                        self.fit_window_to_content()
+                        valid_window.height = self._cached_window.height
                         return valid_window
 
             # 1. 优先复用已锁定的窗口（防止窗口移动后排序变化导致选错）
@@ -217,6 +219,8 @@ class WindowManager:
                 valid_window = self._verify_and_pin_window(self._pinned_hwnd, title_keyword)
                 if valid_window:
                     self._ensure_window_on_screen(valid_window, window_position)
+                    self.fit_window_to_content()
+                    valid_window.height = self._cached_window.height
                     return valid_window
                 else:
                     lost = self._pinned_hwnd
@@ -289,6 +293,10 @@ class WindowManager:
             self._all_claimed_hwnds.add(self._pinned_hwnd)
             info = self._create_window_info(w)
             self._ensure_window_on_screen(info, window_position)
+            # 自适应窗口尺寸以消除游戏内容外的黑边
+            self.fit_window_to_content()
+            # 同步 info 高度（fit_window_to_content 已更新 _cached_window.height）
+            info.height = self._cached_window.height
             return info
 
         except Exception as e:
@@ -394,6 +402,70 @@ class WindowManager:
         try:
             return bool(ctypes.windll.user32.IsWindowVisible(self._cached_window.hwnd))
         except Exception:
+            return False
+
+    def fit_window_to_content(self, black_thresh: int = 15) -> bool:
+        """自动调整窗口尺寸以消除游戏内容外的黑边。
+
+        QQ 小程序窗口的内部画布有固定宽高比,窗口拉伸后画布按比例缩放,
+        多余区域填充黑色。截图后找非黑内容的边界,反推目标窗口尺寸,
+        保持当前宽度不变,按内容比例调整高度(去上下黑条)。
+        """
+        if not self._cached_window:
+            return False
+        try:
+            import cv2
+            import numpy as np
+            from core.screen_capture import ScreenCapture
+
+            hwnd = self._cached_window.hwnd
+            w0 = self._cached_window.width
+            h0 = self._cached_window.height
+            rect0 = (self._cached_window.left, self._cached_window.top, w0, h0)
+
+            sc = ScreenCapture()
+            img = sc.capture(rect0, hwnd=hwnd)
+            if img is None:
+                return False
+            cv = cv2.cvtColor(np.array(img), cv2.COLOR_BGR2GRAY)
+            nonblack_rows = np.where(cv.max(axis=1) > black_thresh)[0]
+            nonblack_cols = np.where(cv.max(axis=0) > black_thresh)[0]
+            if len(nonblack_rows) < 10 or len(nonblack_cols) < 10:
+                return False
+            ct, cb = int(nonblack_rows[0]), int(nonblack_rows[-1])
+            cl, cr = int(nonblack_cols[0]), int(nonblack_cols[-1])
+            cw, ch = cr - cl + 1, cb - ct + 1
+            if cw < 100 or ch < 100:
+                return False
+
+            # 按内容比例算新窗口高度(宽度保持不变以减少对布局影响)
+            target_ratio = cw / ch
+            cur_ratio = w0 / h0
+            if abs(target_ratio - cur_ratio) < 0.005:
+                return True  # 已经匹配,无需调整
+
+            new_h = int(w0 / target_ratio)
+            # 限制在合理范围(避免缩太小或超出屏幕)
+            new_h = max(400, min(new_h, h0 + 200))
+            if abs(new_h - h0) < 10:
+                return True  # 差异太小,不调整避免抖动
+
+            ctypes.windll.user32.MoveWindow(
+                hwnd,
+                self._cached_window.left,
+                self._cached_window.top,
+                w0,
+                new_h,
+                True,
+            )
+            self._cached_window.height = new_h
+            logger.info(
+                f"窗口自适应: {w0}x{h0} → {w0}x{new_h} "
+                f"(内容比例={target_ratio:.4f}, 消除黑边)"
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"窗口自适应失败: {e}")
             return False
 
     def get_window_handle(self) -> int | None:
